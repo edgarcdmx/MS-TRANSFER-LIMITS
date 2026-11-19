@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Native git pre-push hook for MS-TRANSFER-LIMITS (blocks pushes made outside Claude Code too).
+# Activate once per clone:  bash scripts/install-hooks.sh   (= git config core.hooksPath .githooks)
+# Runs scripts/quality-gate.sh and requires target/review/REVIEW_OK == HEAD
+# (written by the code-security-reviewer subagent when its verdict is APPROVED).
+# Bypassing with --no-verify is forbidden by project policy (CLAUDE.md).
+set -u
+
+ROOT="$(git rev-parse --show-toplevel)" || exit 1
+# shellcheck source=../scripts/lib/common.sh
+. "$ROOT/scripts/lib/common.sh"
+
+# Read the refs being pushed (stdin): "<local ref> <local sha> <remote ref> <remote sha>".
+# A push that only deletes remote refs carries no code; let it through.
+only_deletes=1
+saw_ref=0
+ZERO="0000000000000000000000000000000000000000"
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  saw_ref=1
+  [ "$local_sha" != "$ZERO" ] && only_deletes=0
+done
+if [ "$saw_ref" -eq 1 ] && [ "$only_deletes" -eq 1 ]; then
+  exit 0
+fi
+
+echo "[pre-push] running quality gate ..." >&2
+# QG_REUSE=1: if the Claude Code PreToolUse hook already ran the gate for this exact
+# HEAD + working tree, do not run the full build twice.
+if ! QG_REUSE=1 bash "$ROOT/scripts/quality-gate.sh" 1>&2; then
+  echo "[pre-push] BLOCKED: quality gate failed. Fix, commit and push again." >&2
+  exit 1
+fi
+
+if ! review_ok_matches_head "$ROOT"; then
+  echo "[pre-push] BLOCKED: no APPROVED code-security-reviewer verdict for HEAD." >&2
+  exit 1
+fi
+
+echo "[pre-push] OK: quality gate passed and review approved for HEAD." >&2
+exit 0
