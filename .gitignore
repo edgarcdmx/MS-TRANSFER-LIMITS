@@ -1,0 +1,19 @@
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+# IDE
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+# OS
+.DS_Store
+Thumbs.db
+# Secrets / local
+.env
+.env.*
+*.pem
+*.key
+.claude/settings.local.json
