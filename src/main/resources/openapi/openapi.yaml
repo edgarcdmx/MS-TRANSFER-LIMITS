@@ -95,6 +95,15 @@ paths:
                   $ref: '#/components/examples/ChannelLimitUpdated'
         '400':
           $ref: '#/components/responses/ValidationError'
+        '409':
+          description: Otra solicitud modificó el mismo límite de forma concurrente (`CONCURRENT_UPDATE`); reintentar.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                concurrentUpdate:
+                  $ref: '#/components/examples/ConcurrentUpdate'
         '422':
           description: Regla de negocio violada (`perOperationLimit` > `dailyLimit`).
           content:
@@ -174,7 +183,10 @@ paths:
                 limitNotFound:
                   $ref: '#/components/examples/LimitNotFound'
         '409':
-          description: El `transferId` ya fue usado con un payload distinto.
+          description: |
+            El `transferId` ya fue usado con un payload distinto (`TRANSFER_ID_CONFLICT`), o un
+            conflicto concurrente de persistencia impidió completar la operación
+            (`CONCURRENT_UPDATE`; reintentar).
           content:
             application/problem+json:
               schema:
@@ -182,6 +194,8 @@ paths:
               examples:
                 transferIdConflict:
                   $ref: '#/components/examples/TransferIdConflict'
+                concurrentUpdate:
+                  $ref: '#/components/examples/ConcurrentUpdate'
         '422':
           description: Transferencia rechazada por exceder un límite (incluye `reasonCode`).
           content:
@@ -407,10 +421,15 @@ components:
         | ACCOUNT_LIMITS_NOT_FOUND | 404 | .../account-limits-not-found |
         | LIMIT_NOT_FOUND | 404 | .../limit-not-found |
         | TRANSFER_ID_CONFLICT | 409 | .../transfer-id-conflict |
+        | CONCURRENT_UPDATE | 409 | .../concurrent-update |
         | INVALID_LIMIT_CONFIGURATION | 422 | .../invalid-limit-configuration |
         | PER_OPERATION_LIMIT_EXCEEDED | 422 | .../per-operation-limit-exceeded |
         | DAILY_LIMIT_EXCEEDED | 422 | .../daily-limit-exceeded |
         | INTERNAL_ERROR | 500 | .../internal-error |
+
+        Los errores generados por el framework fuera de este catálogo (405, 406, 415, 404 de rutas
+        inexistentes) usan `type: about:blank` y `code` igual al nombre del estado HTTP
+        (p. ej. `METHOD_NOT_ALLOWED`).
       required: [type, title, status, code]
       properties:
         type:
@@ -551,6 +570,16 @@ components:
         code: TRANSFER_ID_CONFLICT
         traceId: 4bf92f3577b34da6a3ce929d0e0e4736
         transferId: 3f1c2b9e-7a4d-4c1e-9b8a-2d6f5e4c3b2a
+    ConcurrentUpdate:
+      summary: Modificación concurrente
+      value:
+        type: https://api.banamex.example/problems/concurrent-update
+        title: Actualización concurrente
+        status: 409
+        detail: El recurso fue modificado por otra solicitud concurrente; vuelva a intentarlo.
+        instance: /api/v1/accounts/0012345678/limits/MOBILE_APP
+        code: CONCURRENT_UPDATE
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
     InvalidLimitConfiguration:
       summary: Límite por operación mayor que el diario
       value:

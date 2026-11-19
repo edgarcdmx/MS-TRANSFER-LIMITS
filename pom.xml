@@ -31,6 +31,7 @@
     <!-- Libraries -->
     <commons-text.version>1.15.0</commons-text.version>
     <springdoc-openapi.version>3.2.0</springdoc-openapi.version>
+    <swagger-parser.version>2.1.49</swagger-parser.version>
 
     <!-- Build plugins / quality tooling -->
     <spotless-maven-plugin.version>3.11.0</spotless-maven-plugin.version>
@@ -108,6 +109,13 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-webmvc-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Contract conformance test: parses openapi.yaml -->
+    <dependency>
+      <groupId>io.swagger.parser.v3</groupId>
+      <artifactId>swagger-parser</artifactId>
+      <version>${swagger-parser.version}</version>
       <scope>test</scope>
     </dependency>
   </dependencies>

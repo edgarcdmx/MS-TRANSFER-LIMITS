@@ -18,6 +18,10 @@ spring:
   mvc:
     problemdetails:
       enabled: true
+  jackson:
+    deserialization:
+      # Request schemas declare additionalProperties: false (openapi.yaml): unknown fields -> 400.
+      fail-on-unknown-properties: true
   lifecycle:
     timeout-per-shutdown-phase: 20s
 
