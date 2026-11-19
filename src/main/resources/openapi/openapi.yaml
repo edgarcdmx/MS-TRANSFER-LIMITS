@@ -1,0 +1,587 @@
+openapi: 3.1.0
+info:
+  title: MS-TRANSFER-LIMITS API
+  version: 1.0.0
+  summary: Validación de transferencias contra límites diarios y por operación.
+  description: |
+    Microservicio que decide si una transferencia puede realizarse según los límites
+    configurados por cuenta y canal, registra el consumo del límite diario y rechaza las
+    operaciones que lo exceden.
+
+    - Montos en MXN con escala 2 (máximo 2 decimales).
+    - El "día" es la fecha de negocio en la zona `America/Mexico_City` (configurable).
+    - Todos los errores siguen RFC 9457 (`application/problem+json`).
+    - Contrato contract-first: este archivo es la fuente de verdad (ver ADR-003).
+  contact:
+    name: Equipo MS-TRANSFER-LIMITS
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: http://localhost:8080
+    description: Local
+tags:
+  - name: Limits
+    description: Consulta y administración de límites por cuenta y canal.
+  - name: TransferValidations
+    description: Validación y consumo de límites para transferencias.
+
+paths:
+  /api/v1/accounts/{accountId}/limits:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      tags: [Limits]
+      operationId: getAccountLimits
+      summary: Consulta límites y consumo del día por canal.
+      description: |
+        Devuelve, para cada canal configurado de la cuenta, el límite diario, el límite por
+        operación, lo consumido en la fecha de negocio actual y el disponible.
+      responses:
+        '200':
+          description: Límites y consumo del día.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountLimitsResponse'
+              examples:
+                limits:
+                  $ref: '#/components/examples/AccountLimitsOk'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          description: La cuenta no tiene límites configurados.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                accountLimitsNotFound:
+                  $ref: '#/components/examples/AccountLimitsNotFound'
+
+  /api/v1/accounts/{accountId}/limits/{channelId}:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+      - $ref: '#/components/parameters/ChannelId'
+    put:
+      tags: [Limits]
+      operationId: updateChannelLimit
+      summary: Crea o actualiza los límites de un canal.
+      description: |
+        Crea (upsert) o actualiza el límite diario y el límite por operación del canal.
+        Regla: `perOperationLimit` debe ser menor o igual a `dailyLimit`; si no, responde 422.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateChannelLimitRequest'
+            examples:
+              update:
+                summary: Actualización válida
+                value:
+                  dailyLimit: 50000.00
+                  perOperationLimit: 20000.00
+                  currency: MXN
+      responses:
+        '200':
+          description: Límite creado o actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelLimitResponse'
+              examples:
+                updated:
+                  $ref: '#/components/examples/ChannelLimitUpdated'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '422':
+          description: Regla de negocio violada (`perOperationLimit` > `dailyLimit`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                invalidLimitConfiguration:
+                  $ref: '#/components/examples/InvalidLimitConfiguration'
+
+  /api/v1/accounts/{accountId}/transfer-validations:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    post:
+      tags: [TransferValidations]
+      operationId: validateTransfer
+      summary: Valida una transferencia y consume el límite diario.
+      description: |
+        Aprueba la transferencia sólo si `amount <= perOperationLimit` y
+        `consumedToday + amount <= dailyLimit`; el consumo se registra en la misma transacción.
+
+        Idempotencia por `transferId`:
+        - Mismo `transferId` y mismo payload de una validación aprobada → 200 con el resultado
+          original, sin volver a consumir.
+        - Mismo `transferId` y mismo payload de una validación rechazada → 422 con el rechazo
+          original.
+        - Mismo `transferId` con payload distinto → 409 `TRANSFER_ID_CONFLICT`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferValidationRequest'
+            examples:
+              transfer:
+                summary: Transferencia de 1,500.00 MXN por app móvil
+                value:
+                  transferId: 3f1c2b9e-7a4d-4c1e-9b8a-2d6f5e4c3b2a
+                  channel: MOBILE_APP
+                  amount: 1500.00
+                  currency: MXN
+      responses:
+        '201':
+          description: Transferencia aprobada y consumo registrado.
+          headers:
+            Location:
+              description: URI del recurso de validación creado.
+              schema:
+                type: string
+                format: uri-reference
+              example: /api/v1/accounts/0012345678/transfer-validations/3f1c2b9e-7a4d-4c1e-9b8a-2d6f5e4c3b2a
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferValidationResponse'
+              examples:
+                approved:
+                  $ref: '#/components/examples/TransferApproved'
+        '200':
+          description: Reintento idempotente de un `transferId` ya aprobado; se devuelve el resultado original sin consumir de nuevo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferValidationResponse'
+              examples:
+                replay:
+                  $ref: '#/components/examples/TransferApproved'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          description: No hay límites configurados para la cuenta y canal.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                limitNotFound:
+                  $ref: '#/components/examples/LimitNotFound'
+        '409':
+          description: El `transferId` ya fue usado con un payload distinto.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                transferIdConflict:
+                  $ref: '#/components/examples/TransferIdConflict'
+        '422':
+          description: Transferencia rechazada por exceder un límite (incluye `reasonCode`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                perOperationLimitExceeded:
+                  $ref: '#/components/examples/PerOperationLimitExceeded'
+                dailyLimitExceeded:
+                  $ref: '#/components/examples/DailyLimitExceeded'
+
+components:
+  parameters:
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      description: Identificador de la cuenta (alfanumérico y guiones, 1 a 34 caracteres).
+      schema:
+        $ref: '#/components/schemas/AccountId'
+      example: '0012345678'
+    ChannelId:
+      name: channelId
+      in: path
+      required: true
+      description: Canal cuyo límite se crea o actualiza.
+      schema:
+        $ref: '#/components/schemas/Channel'
+      example: MOBILE_APP
+
+  schemas:
+    AccountId:
+      type: string
+      pattern: '^[A-Za-z0-9-]{1,34}$'
+      minLength: 1
+      maxLength: 34
+      examples: ['0012345678']
+
+    Channel:
+      type: string
+      description: Canal por el que se origina la transferencia.
+      enum: [MOBILE_APP, WEB, BRANCH]
+
+    Currency:
+      type: string
+      description: Moneda ISO 4217. Sólo se admite MXN.
+      enum: [MXN]
+      pattern: '^MXN$'
+
+    Amount:
+      type: number
+      format: decimal
+      description: Monto en MXN con escala 2 (máximo 2 decimales).
+      multipleOf: 0.01
+      examples: [1500.00]
+
+    ValidationStatus:
+      type: string
+      enum: [APPROVED]
+      description: Estado de una validación exitosa. Los rechazos se devuelven como Problem Detail 422.
+
+    RejectionReasonCode:
+      type: string
+      enum: [PER_OPERATION_LIMIT_EXCEEDED, DAILY_LIMIT_EXCEEDED]
+
+    ChannelLimitResponse:
+      type: object
+      description: Límites y consumo del día de un canal.
+      required: [channel, currency, dailyLimit, perOperationLimit, consumedToday, availableToday, updatedAt]
+      properties:
+        channel:
+          $ref: '#/components/schemas/Channel'
+        currency:
+          $ref: '#/components/schemas/Currency'
+        dailyLimit:
+          allOf:
+            - $ref: '#/components/schemas/Amount'
+          minimum: 0
+          description: Límite diario del canal.
+        perOperationLimit:
+          allOf:
+            - $ref: '#/components/schemas/Amount'
+          minimum: 0
+          description: Límite por operación del canal.
+        consumedToday:
+          allOf:
+            - $ref: '#/components/schemas/Amount'
+          minimum: 0
+          description: Monto aprobado en la fecha de negocio actual.
+        availableToday:
+          allOf:
+            - $ref: '#/components/schemas/Amount'
+          minimum: 0
+          description: dailyLimit - consumedToday (nunca negativo).
+        updatedAt:
+          type: string
+          format: date-time
+          description: Última modificación de la configuración del límite.
+
+    AccountLimitsResponse:
+      type: object
+      required: [accountId, businessDate, channels]
+      properties:
+        accountId:
+          $ref: '#/components/schemas/AccountId'
+        businessDate:
+          type: string
+          format: date
+          description: Fecha de negocio (America/Mexico_City) usada para calcular el consumo.
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChannelLimitResponse'
+
+    UpdateChannelLimitRequest:
+      type: object
+      required: [dailyLimit, perOperationLimit]
+      additionalProperties: false
+      description: Debe cumplirse perOperationLimit <= dailyLimit (si no, 422 INVALID_LIMIT_CONFIGURATION).
+      properties:
+        dailyLimit:
+          allOf:
+            - $ref: '#/components/schemas/Amount'
+          minimum: 0
+        perOperationLimit:
+          allOf:
+            - $ref: '#/components/schemas/Amount'
+          minimum: 0
+        currency:
+          type: string
+          pattern: '^MXN$'
+          default: MXN
+
+    TransferValidationRequest:
+      type: object
+      required: [transferId, channel, amount, currency]
+      additionalProperties: false
+      properties:
+        transferId:
+          type: string
+          format: uuid
+          description: Clave de idempotencia generada por el cliente.
+        channel:
+          $ref: '#/components/schemas/Channel'
+        amount:
+          allOf:
+            - $ref: '#/components/schemas/Amount'
+          exclusiveMinimum: 0
+          description: Monto a transferir (> 0, máximo 2 decimales).
+        currency:
+          $ref: '#/components/schemas/Currency'
+
+    TransferValidationResponse:
+      type: object
+      required:
+        - transferId
+        - accountId
+        - status
+        - channel
+        - amount
+        - currency
+        - dailyLimit
+        - perOperationLimit
+        - consumedToday
+        - availableToday
+        - businessDate
+        - validatedAt
+      properties:
+        transferId:
+          type: string
+          format: uuid
+        accountId:
+          $ref: '#/components/schemas/AccountId'
+        status:
+          $ref: '#/components/schemas/ValidationStatus'
+        channel:
+          $ref: '#/components/schemas/Channel'
+        amount:
+          $ref: '#/components/schemas/Amount'
+        currency:
+          $ref: '#/components/schemas/Currency'
+        dailyLimit:
+          $ref: '#/components/schemas/Amount'
+        perOperationLimit:
+          $ref: '#/components/schemas/Amount'
+        consumedToday:
+          allOf:
+            - $ref: '#/components/schemas/Amount'
+          description: Consumo del día incluyendo esta transferencia.
+        availableToday:
+          allOf:
+            - $ref: '#/components/schemas/Amount'
+          description: Disponible del día después de esta transferencia.
+        businessDate:
+          type: string
+          format: date
+        validatedAt:
+          type: string
+          format: date-time
+
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+          description: Ruta del campo inválido (p. ej. `amount` o `accountId`).
+        message:
+          type: string
+
+    ProblemDetail:
+      type: object
+      description: |
+        Problem Details for HTTP APIs (RFC 9457). Además de los miembros estándar incluye las
+        extensiones `code`, `traceId`, `errors` (validación) y, en rechazos de transferencia,
+        `transferId` y `reasonCode`.
+
+        Catálogo de `code` (type = https://api.banamex.example/problems/<kebab-code>):
+        | code | status | type |
+        |---|---|---|
+        | VALIDATION_ERROR | 400 | .../validation-error |
+        | ACCOUNT_LIMITS_NOT_FOUND | 404 | .../account-limits-not-found |
+        | LIMIT_NOT_FOUND | 404 | .../limit-not-found |
+        | TRANSFER_ID_CONFLICT | 409 | .../transfer-id-conflict |
+        | INVALID_LIMIT_CONFIGURATION | 422 | .../invalid-limit-configuration |
+        | PER_OPERATION_LIMIT_EXCEEDED | 422 | .../per-operation-limit-exceeded |
+        | DAILY_LIMIT_EXCEEDED | 422 | .../daily-limit-exceeded |
+        | INTERNAL_ERROR | 500 | .../internal-error |
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          format: uri
+          examples: ['https://api.banamex.example/problems/daily-limit-exceeded']
+        title:
+          type: string
+        status:
+          type: integer
+          format: int32
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+          description: Código estable de error, legible por máquinas.
+        traceId:
+          type: string
+          description: Trace ID de OpenTelemetry (W3C, 32 hex) para correlacionar con logs y trazas.
+        errors:
+          type: array
+          description: Errores de validación por campo (sólo en VALIDATION_ERROR).
+          items:
+            $ref: '#/components/schemas/FieldError'
+        transferId:
+          type: string
+          format: uuid
+          description: Presente en rechazos y conflictos de transferencia.
+        reasonCode:
+          $ref: '#/components/schemas/RejectionReasonCode'
+      additionalProperties: true
+
+  responses:
+    ValidationError:
+      description: Petición inválida (parámetros, cuerpo malformado o violaciones de Bean Validation).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          examples:
+            validationError:
+              $ref: '#/components/examples/ValidationError'
+
+  examples:
+    AccountLimitsOk:
+      summary: Límites de la cuenta con consumo del día
+      value:
+        accountId: '0012345678'
+        businessDate: '2026-11-19'
+        channels:
+          - channel: MOBILE_APP
+            currency: MXN
+            dailyLimit: 50000.00
+            perOperationLimit: 20000.00
+            consumedToday: 1500.00
+            availableToday: 48500.00
+            updatedAt: '2026-11-18T15:04:05Z'
+          - channel: WEB
+            currency: MXN
+            dailyLimit: 100000.00
+            perOperationLimit: 50000.00
+            consumedToday: 0.00
+            availableToday: 100000.00
+            updatedAt: '2026-11-18T15:04:05Z'
+    ChannelLimitUpdated:
+      summary: Límite de canal actualizado
+      value:
+        channel: MOBILE_APP
+        currency: MXN
+        dailyLimit: 50000.00
+        perOperationLimit: 20000.00
+        consumedToday: 1500.00
+        availableToday: 48500.00
+        updatedAt: '2026-11-19T17:20:00Z'
+    TransferApproved:
+      summary: Transferencia aprobada
+      value:
+        transferId: 3f1c2b9e-7a4d-4c1e-9b8a-2d6f5e4c3b2a
+        accountId: '0012345678'
+        status: APPROVED
+        channel: MOBILE_APP
+        amount: 1500.00
+        currency: MXN
+        dailyLimit: 50000.00
+        perOperationLimit: 20000.00
+        consumedToday: 1500.00
+        availableToday: 48500.00
+        businessDate: '2026-11-19'
+        validatedAt: '2026-11-19T17:21:30.123Z'
+    ValidationError:
+      summary: Error de validación
+      value:
+        type: https://api.banamex.example/problems/validation-error
+        title: Solicitud inválida
+        status: 400
+        detail: La solicitud contiene campos inválidos.
+        instance: /api/v1/accounts/0012345678/transfer-validations
+        code: VALIDATION_ERROR
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        errors:
+          - field: amount
+            message: debe ser mayor que 0 y tener máximo 2 decimales
+          - field: transferId
+            message: no debe ser nulo
+    AccountLimitsNotFound:
+      summary: Cuenta sin límites configurados
+      value:
+        type: https://api.banamex.example/problems/account-limits-not-found
+        title: Límites no encontrados
+        status: 404
+        detail: La cuenta 0012345678 no tiene límites configurados.
+        instance: /api/v1/accounts/0012345678/limits
+        code: ACCOUNT_LIMITS_NOT_FOUND
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    LimitNotFound:
+      summary: Canal sin límite configurado
+      value:
+        type: https://api.banamex.example/problems/limit-not-found
+        title: Límite no encontrado
+        status: 404
+        detail: La cuenta 0012345678 no tiene límite configurado para el canal BRANCH.
+        instance: /api/v1/accounts/0012345678/transfer-validations
+        code: LIMIT_NOT_FOUND
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    TransferIdConflict:
+      summary: transferId reutilizado con otro payload
+      value:
+        type: https://api.banamex.example/problems/transfer-id-conflict
+        title: Conflicto de transferId
+        status: 409
+        detail: El transferId 3f1c2b9e-7a4d-4c1e-9b8a-2d6f5e4c3b2a ya fue utilizado con datos distintos.
+        instance: /api/v1/accounts/0012345678/transfer-validations
+        code: TRANSFER_ID_CONFLICT
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        transferId: 3f1c2b9e-7a4d-4c1e-9b8a-2d6f5e4c3b2a
+    InvalidLimitConfiguration:
+      summary: Límite por operación mayor que el diario
+      value:
+        type: https://api.banamex.example/problems/invalid-limit-configuration
+        title: Configuración de límite inválida
+        status: 422
+        detail: El límite por operación (60,000.00 MXN) no puede ser mayor que el límite diario (50,000.00 MXN).
+        instance: /api/v1/accounts/0012345678/limits/MOBILE_APP
+        code: INVALID_LIMIT_CONFIGURATION
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    PerOperationLimitExceeded:
+      summary: Rechazo por límite por operación
+      value:
+        type: https://api.banamex.example/problems/per-operation-limit-exceeded
+        title: Límite por operación excedido
+        status: 422
+        detail: El monto 25,000.00 MXN excede el límite por operación de 20,000.00 MXN para el canal MOBILE_APP.
+        instance: /api/v1/accounts/0012345678/transfer-validations
+        code: PER_OPERATION_LIMIT_EXCEEDED
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        transferId: 3f1c2b9e-7a4d-4c1e-9b8a-2d6f5e4c3b2a
+        reasonCode: PER_OPERATION_LIMIT_EXCEEDED
+    DailyLimitExceeded:
+      summary: Rechazo por límite diario
+      value:
+        type: https://api.banamex.example/problems/daily-limit-exceeded
+        title: Límite diario excedido
+        status: 422
+        detail: El monto 15,000.00 MXN excede el disponible diario de 8,500.00 MXN (límite 50,000.00, consumido 41,500.00) para el canal MOBILE_APP.
+        instance: /api/v1/accounts/0012345678/transfer-validations
+        code: DAILY_LIMIT_EXCEEDED
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        transferId: 3f1c2b9e-7a4d-4c1e-9b8a-2d6f5e4c3b2a
+        reasonCode: DAILY_LIMIT_EXCEEDED
