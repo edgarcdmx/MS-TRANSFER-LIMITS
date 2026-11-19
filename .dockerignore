@@ -1,0 +1,34 @@
+# Build output and VCS
+target/
+**/target/
+.git/
+.gitignore
+.gitattributes
+.githooks/
+
+# Agent harness, IDE and OS files
+.claude/
+.mcp.json
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Not needed to build the jar (tests run in `./mvnw verify` outside the image)
+src/test/
+docs/
+scripts/
+*.md
+mvnw.cmd
+
+# Container definitions themselves
+Dockerfile
+.dockerignore
+compose.yaml
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
