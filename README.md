@@ -141,11 +141,11 @@ cd MS-TRANSFER-LIMITS
 | Fase | Acción | Auto-reparación / reintentos |
 | :--- | :--- | :--- |
 | 0. Preflight | Detecta SO/arquitectura, git, curl, espacio en disco, proxy y puertos libres | Si 8080/5432 están ocupados, elige el siguiente puerto libre |
-| 1. JDK 27 | Usa `JAVA_HOME`/`java` si es 27; si no, descarga **Temurin 27 portable** (Adoptium, SHA-256 verificado) en `~/.local/devtools/jdk` — sin permisos de administrador | Reintentos con *backoff* en la descarga |
+| 1. JDK 27 | Usa `JAVA_HOME`/`java` si es 27; si no, descarga **Temurin 27 portable** (Adoptium) en `~/.local/devtools/jdk` — sin permisos de administrador. El **SHA-256 es obligatorio**: sin checksum publicado se aborta (salvo `--insecure-download`) | Reintentos con *backoff* en la descarga |
 | 2. Build + gate | `./mvnw -B verify`: formato Google, Checkstyle, 267 pruebas, JaCoCo ≥ 90 % | Red/descargas → reintento con `-U`; `TMP` en otra unidad → reubica `java.io.tmpdir`; `target/` obsoleto → limpia y reintenta; formato/Checkstyle/cobertura → diagnóstico claro (no reformatea en silencio) |
-| 3. Runtime | **Docker:** genera `.env` con contraseña aleatoria desde `env.example` y `docker compose up -d --build` (PostgreSQL 18 + app + Jaeger). **Local (sin Docker):** descarga **PostgreSQL 18 portable** (binarios zonky de Maven Central, SHA-1 verificado), `initdb` + `pg_ctl` y arranca el jar | Espera health con timeout; si falla muestra logs, diagnostica (puerto, credenciales, Flyway), `down -v`/reinicio y reintenta |
+| 3. Runtime | **Docker:** genera `.env` con contraseña aleatoria desde `env.example` y `docker compose up -d --build` (PostgreSQL 18 + app + Jaeger). **Local (sin Docker):** descarga **PostgreSQL 18 portable** (binarios zonky de Maven Central; checksum obligatorio, el más fuerte publicado: SHA-512 → SHA-256 → SHA-1), `initdb` + `pg_ctl` y arranca el jar escuchando sólo en `127.0.0.1` | Espera health con timeout; si falla muestra logs, diagnostica (puerto, credenciales, Flyway) y reintenta. En Docker usa `docker compose down` **conservando el volumen de datos**; sólo lo borra con `--reset-db`. Si la BD rechaza la contraseña de `.env`, explica la causa en vez de borrar datos |
 | 4. Demo R1–R14 | Ejecuta con `curl` la demo de **cada requisito original** (tabla abajo) | — |
-| 5. Reporte | Escribe `target/install-report/REPORTE_INSTALACION.md` con entorno, versiones, fases, evidencia por requisito y rutas de logs; resumen en consola | Código de salida `0` sólo si todo lo no omitido pasa |
+| 5. Reporte | Escribe `target/install-report/REPORTE_INSTALACION.md` con entorno, versiones, fases, evidencia por requisito y rutas de logs (sin contraseñas; los ids de cuenta en los logs de la app se enmascaran); resumen en consola | Código de salida `0` sólo si todo lo no omitido pasa |
 
 **Requisitos verificados por la demo:**
 
@@ -180,7 +180,9 @@ cd MS-TRANSFER-LIMITS
 | `--concurrency N` | Peticiones paralelas de la demo de concurrencia |
 | `--report RUTA` | Ruta del reporte Markdown |
 | `--skip-tests` | Omite pruebas y cobertura (R7 queda SKIPPED; sólo para demos rápidas) |
-| `--ai-fix` | Ante un error irrecuperable, si `claude` está instalado, le pide a Claude Code diagnosticar y corregir con el reporte |
+| `--reset-db` | Modo Docker: en los reintentos borra también el volumen de PostgreSQL (`down -v`). Sin ella, los datos se conservan |
+| `--insecure-download` | Continúa aunque el proveedor no publique checksum (no recomendado) |
+| `--ai-fix` | Ante un error irrecuperable, si `claude` está instalado, pregunta (sólo en terminal interactiva) si Claude Code debe diagnosticar y corregir con el reporte |
 
 En PowerShell se usan los mismos parámetros con estilo PowerShell, p. ej.
 `.\install.ps1 -Mode docker -KeepRunning`. Códigos de salida: `0` éxito, `1` algún requisito falló,
@@ -438,13 +440,13 @@ aprobación del revisor), nunca con `--no-verify`.
 | Pieza | Archivo | Qué hace |
 | :--- | :--- | :--- |
 | Instrucciones | [`CLAUDE.md`](CLAUDE.md) | Propósito, mapa hexagonal, comandos, reglas (Google Style, contract-first, `BigDecimal`, `Clock`, RFC 9457, SQL sólo con parámetros), reglas de pruebas, definición de terminado, flujo obligatorio antes de push y lista de prohibiciones. |
-| Permisos | [`.claude/settings.json`](.claude/settings.json) | **allow:** `./mvnw`, `mvnw.cmd`, `scripts/quality-gate.sh`, `scripts/install-hooks.sh`, `git status/diff/log/add/commit/branch/checkout/rev-parse`, `mcp__github__*`, `mcp__context7__*`, `mcp__fetch__*`. **deny:** leer `.env*`, `git push --force`/`-f`, cualquier `--no-verify`, `rm -rf /*`. `enableAllProjectMcpServers: true`. |
+| Permisos | [`.claude/settings.json`](.claude/settings.json) | **allow:** `./mvnw`, `mvnw.cmd`, `scripts/quality-gate.sh`, `scripts/install-hooks.sh`, `git status/diff/log/add/commit/branch/checkout/rev-parse`, `mcp__github__*`, `mcp__context7__*`, `mcp__fetch__*`. **deny:** leer `.env*`; `git push --force`/`-f` (también `git.exe` y PowerShell); cualquier `--no-verify`; `core.hooksPath` junto a push; `rm -rf /*`; y las herramientas MCP de GitHub que escriben sin pasar por los hooks (`push_files`, `create_or_update_file`, `delete_file`, `merge_pull_request`). `enableAllProjectMcpServers: true`. |
 | Skill | `.claude/skills/quality-gate` | Ejecutar e interpretar el gate y corregir formato, Checkstyle, pruebas y cobertura. |
 | Skill | `.claude/skills/new-endpoint` | Flujo contract-first: `openapi.yaml` → DTOs → caso de uso → controller → Problem Details → pruebas → gate. |
 | Skill | `.claude/skills/problem-details` | Catálogo RFC 9457 y procedimiento para agregar un código de error. |
 | Skill | `.claude/skills/docker-release` | Construir la imagen, `docker compose up`, verificar health y trazas en Jaeger. |
 | Subagente | [`.claude/agents/code-security-reviewer.md`](.claude/agents/code-security-reviewer.md) | Revisor de sólo lectura (Google Style, límites hexagonales, dinero, concurrencia, inyección SQL, validación, datos sensibles, OWASP API Top 10, RFC 9457, cobertura, secretos). Devuelve tabla de hallazgos y veredicto; **sólo si es APPROVED** escribe `target/review/REVIEW_OK` con el SHA de `HEAD`. |
-| Hook git nativo | [`.githooks/pre-push`](.githooks/pre-push) | Ejecuta `scripts/quality-gate.sh` y exige `REVIEW_OK == HEAD`; cubre pushes hechos fuera de Claude Code. Se activa con `bash scripts/install-hooks.sh` (`core.hooksPath=.githooks`). |
+| Hook git nativo | [`.githooks/pre-push`](.githooks/pre-push) | Exige que **cada commit empujado** y `HEAD` coincidan con `REVIEW_OK` y luego ejecuta `scripts/quality-gate.sh`; cubre pushes hechos fuera de Claude Code. Se activa con `bash scripts/install-hooks.sh` (`core.hooksPath=.githooks`). |
 | MCP | [`.mcp.json`](.mcp.json) | `github`, `context7`, `fetch`; el token sólo por variable de entorno. |
 
 ### Hooks de Claude Code (`.claude/settings.json`, scripts en `scripts/hooks/`)

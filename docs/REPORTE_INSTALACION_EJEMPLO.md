@@ -2,10 +2,10 @@
 
 | Campo | Valor |
 |---|---|
-| Fecha | 2026-11-19 19:04:24 -0600 |
+| Fecha | 2026-11-19 19:14:38 -0600 |
 | Veredicto | **EXITOSA (13 PASS, 1 SKIPPED, 0 FAIL)** |
 | Modo | `local` (solicitado `local`) |
-| Duración total | 176 s |
+| Duración total | 173 s |
 | Comando | `./install.sh --mode local --retries 3` |
 
 ## Entorno
@@ -19,8 +19,8 @@
 | tar | tar (GNU tar) 1.35 |
 | unzip | UnZip 6.00 of 20 April 2009 |
 | python3 (opcional) | python3 |
-| Commit | main @ c501d0f |
-| Espacio libre (repo) | 760867 MB |
+| Commit | main @ 71976a3 |
+| Espacio libre (repo) | 760862 MB |
 | Proxy | ninguno |
 | Modo | local (solicitado: local) |
 | JDK | openjdk version "27.0.1.0.2" 2026-10-21 OpenJDK Runtime Environment Temurin-27.0.1.0.2+1 (build 27.0.1.0.2+1)  |
@@ -34,9 +34,9 @@
 
 | Fase | Estado | Duración | Intentos | Notas / auto-reparación |
 |---|---|---|---|---|
-| 0. Preflight (sistema, herramientas, puertos, proxy) | OK | 8 s | 1 | — |
-| 1. JDK 27 | OK | 1 s | 1 | JDK portable reutilizado |
-| 2. Build Maven Wrapper + gate de calidad | OK | 70 s | 1 | — |
+| 0. Preflight (sistema, herramientas, puertos, proxy) | OK | 6 s | 1 | — |
+| 1. JDK 27 | OK | 1 s | 1 | JAVA_HOME existente |
+| 2. Build Maven Wrapper + gate de calidad | OK | 69 s | 1 | — |
 | 3. Runtime (local) | OK | 41 s | 1 | binarios PostgreSQL reutilizados |
 | 4. Demo y verificacion de requisitos R1-R14 | OK | 55 s | 1 | — |
 
@@ -48,10 +48,10 @@
 | R2 | Build Maven con wrapper | **PASS** | 2/2 | Apache Maven 3.9.16 via ./mvnw; verify; log target/install/logs/build-attempt1.log |
 | R3 | Google Java Style (Spotless + Checkstyle) | **PASS** | 2/2 | spotless:check + checkstyle:check en verify; You have 0 Checkstyle violations; failOnViolation=true |
 | R4 | Errores RFC 9457 (Problem Details) | **PASS** | 7/7 | codigos verificados 400/404/409/422 con application/problem+json y type/title/status/detail/instance/code/traceId |
-| R5 | Trazas OpenTelemetry | **PASS** | 3/3 | traceId en Problem Details (7) y en el log (7); OTLP/HTTP exportado a receptor local (6 envios, 7 traceId encontrados). Jaeger no disponible sin Docker |
+| R5 | Trazas OpenTelemetry | **PASS** | 3/3 | traceId en Problem Details (7) y en el log (7); OTLP/HTTP exportado a receptor local (7 envios, 7 traceId encontrados). Jaeger no disponible sin Docker |
 | R6 | Imagen Docker lista | **SKIPPED** | 0/0 | Docker no disponible en este equipo (modo local): no se construyo la imagen. Verificacion estatica: Dockerfile (eclipse-temurin:27, HEALTHCHECK, USER spring) y compose.yaml presentes |
 | R7 | Cobertura JaCoCo >= 90 % | **PASS** | 2/2 | LINE 100.00 % (592/592), BRANCH 100.00 % (116/116); jacoco:check en verify; Tests run: 267, Failures: 0, Errors: 0, Skipped: 0 |
-| R8 | Concurrencia (limite diario atomico + idempotencia) | **PASS** | 6/6 | 40 peticiones paralelas en 2850 ms: 201=33, 422=7, otros=0; consumedToday=9900.00 (limite 10000.00, esperado 9900.00); 20 peticiones paralelas mismo transferId: 201=1, 200=19, otros=0; consumedToday=300.00 (esperado 300.00) |
+| R8 | Concurrencia (limite diario atomico + idempotencia) | **PASS** | 6/6 | 40 peticiones paralelas en 2971 ms: 201=33, 422=7, otros=0; consumedToday=9900.00 (limite 10000.00, esperado 9900.00); 20 peticiones paralelas mismo transferId: 201=1, 200=19, otros=0; consumedToday=300.00 (esperado 300.00) |
 | R9 | Contrato OpenAPI 3 publicado | **PASS** | 3/3 | /openapi/openapi.yaml (openapi: 3.1.0), /v3/api-docs 200, swagger-ui 200 |
 | R10 | PostgreSQL + Flyway (persistencia) | **PASS** | 4/4 | PostgreSQL 18.7.0 embebido (zonky) en 127.0.0.1:5432; Successfully applied 1 migration to schema "public"; datos y replay sobreviven al reinicio de la app |
 | R11 | Reglas de negocio (PUT/GET/POST, 201/200/409/400/404/422) | **PASS** | 22/22 | PUT x3 200; POST 201+Location; replay 200 identico; 422 por operacion/diario; 409; 400 errors[]; 404; consumo final 41,500.00 |
@@ -61,7 +61,7 @@
 
 ## Concurrencia (R8)
 
-- Límite diario 10,000.00 MXN, monto 300.00 MXN: 40 peticiones paralelas en 2850 ms: 201=33, 422=7, otros=0; consumedToday=9900.00 (limite 10000.00, esperado 9900.00)
+- Límite diario 10,000.00 MXN, monto 300.00 MXN: 40 peticiones paralelas en 2971 ms: 201=33, 422=7, otros=0; consumedToday=9900.00 (limite 10000.00, esperado 9900.00)
 - Idempotencia concurrente: 20 peticiones paralelas mismo transferId: 201=1, 200=19, otros=0; consumedToday=300.00 (esperado 300.00)
 
 ## Cobertura (R7)
@@ -85,7 +85,7 @@ PASS [R11] PUT limite MOBILE_APP (50,000 diario / 20,000 por operacion) -> 200
 PASS [R11] PUT limite WEB -> 200
 PASS [R11] PUT limite BRANCH -> 200
 PASS [R11] GET limites -> 200 con 3 canales
-PASS [R11] POST 1,500.00 -> 201 APPROVED con Location: /api/v1/accounts/DEMO-19062622/transfer-validations/05abac11-0001-4001-8001-000000000001
+PASS [R11] POST 1,500.00 -> 201 APPROVED con Location: /api/v1/accounts/DEMO-19163697/transfer-validations/05abae74-0001-4001-8001-000000000001
 PASS [R11] reintento idempotente mismo transferId -> 200 con cuerpo identico
 PASS [R11] POST 25,000.00 > limite por operacion -> HTTP 422 (esperado 422)
 PASS [R4] POST 25,000.00 > limite por operacion: application/problem+json con type/title/status/detail/instance/code/traceId
@@ -135,7 +135,7 @@ PASS [R10] tras reiniciar la app los datos persisten (MOBILE_APP consumedToday=4
 PASS [R10] idempotencia persistida: replay del primer transferId tras reinicio -> 200
 PASS [R5] traceId W3C (32 hex) en 7 Problem Details
 PASS [R5] traceId de las respuestas presente en lineas del log de la app (7/7)
-PASS [R5] exportador OTLP/HTTP: 6 envios a /v1/traces; 7/7 traceId de Problem Details presentes en los spans exportados
+PASS [R5] exportador OTLP/HTTP: 7 envios a /v1/traces; 7/7 traceId de Problem Details presentes en los spans exportados
 ```
 
 ## Logs

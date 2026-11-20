@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Claude Code PreToolUse hook (matcher: Edit|Write|MultiEdit|NotebookEdit).
-# Blocks writes to secrets (.env* except the .env.example template, *.pem, *.key), build output (target/) and git internals (.git/).
+# Blocks writes to secrets (.env*, *.pem, *.key), build output (target/) and git internals (.git/).
 # Exit 0 = allow; exit 2 = block (stderr shown to Claude).
 set -u
 
@@ -35,8 +35,7 @@ block() {
 }
 
 case "$BASE" in
-  # The committed template with placeholder values is the only allowed .env* file.
-  .env.example) ;;
+  # No .env* file may be written; the placeholder template is env.example (outside this pattern).
   .env | .env.* | .env*) block "secrets files (.env*) must never be written by the agent; use environment variables." ;;
   *.pem | *.key) block "private keys/certificates (*.pem, *.key) must never be written to the repository." ;;
 esac

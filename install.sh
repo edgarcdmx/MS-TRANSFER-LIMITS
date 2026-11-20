@@ -30,6 +30,8 @@ RETRIES=3
 REPORT=""
 DO_STOP=0
 AI_FIX=0
+RESET_DB=0
+INSECURE_DOWNLOAD=0
 CONC_N=40
 
 usage() {
@@ -51,6 +53,9 @@ Uso: ./install.sh [opciones]
                             (defecto target/install-report/REPORTE_INSTALACION.md).
   --ai-fix                  ante un fallo irrecuperable, ofrece ejecutar `claude -p` con el
                             diagnostico (solo si el CLI `claude` esta en el PATH).
+  --reset-db                modo docker: en los reintentos borra tambien el volumen de
+                            PostgreSQL (docker compose down -v). Sin ella los datos se conservan.
+  --insecure-download       continua aunque el proveedor no publique checksum (NO recomendado).
   -h, --help                esta ayuda.
 
 Salida: 0 = todos los requisitos no omitidos en PASS; 1 = algun requisito FAIL;
@@ -74,6 +79,8 @@ while [ $# -gt 0 ]; do
     --report) REPORT="${2:-}"; shift 2 ;;
     --report=*) REPORT="${1#*=}"; shift ;;
     --ai-fix) AI_FIX=1; shift ;;
+    --reset-db) RESET_DB=1; shift ;;
+    --insecure-download) INSECURE_DOWNLOAD=1; shift ;;
     -h | --help) usage; exit 0 ;;
     *) echo "Opcion desconocida: $1" >&2; usage >&2; exit 64 ;;
   esac
@@ -315,12 +322,12 @@ offer_ai_fix() {
   [ "$AI_FIX" -eq 1 ] || { have claude && say "  (Sugerencia: vuelva a ejecutar con --ai-fix para que Claude Code diagnostique y corrija.)"; return 0; }
   if ! have claude; then warn "--ai-fix: el CLI 'claude' no esta en el PATH"; return 0; fi
   local prompt="El instalador ./install.sh de MS-TRANSFER-LIMITS fallo. Diagnostico: ${FATAL_DIAG}. Siguiente paso sugerido: ${FATAL_NEXT}. Reporte: $(rel "$REPORT"), logs en $(rel "$LOG_DIR"). Diagnostica y corrige la causa respetando CLAUDE.md, luego vuelve a ejecutar ./install.sh."
-  local ans="s"
+  local ans="n"
   if [ -t 0 ]; then
     printf '%s' "Ejecutar ahora: claude -p \"<diagnostico + reporte>\"? [s/N] "
     read -r ans || ans="n"
   fi
-  case "$ans" in s | S | y | Y | si | yes) say "Ejecutando claude -p ..."; claude -p "$prompt" ;; *) say "Omitido." ;; esac
+  case "$ans" in s | S | y | Y | si | yes) say "Ejecutando claude -p ..."; claude -p "$prompt" ;; *) say "Omitido (sin terminal interactiva o respuesta negativa)." ;; esac
 }
 
 # ==================================================================================== STOP ===
@@ -502,8 +509,12 @@ download_jdk() {
     if [ "$sum" != "$expect" ]; then err "checksum SHA-256 no coincide ($sum != $expect)"; rm -f "$dl/$file"; return 1; fi
     ok "checksum SHA-256 verificado"
     phase_note "JDK descargado y SHA-256 verificado"
+  elif [ "$INSECURE_DOWNLOAD" -eq 1 ]; then
+    warn "Adoptium no publico checksum; se continua SIN verificar (--insecure-download)"
+    phase_note "JDK sin checksum (--insecure-download)"
   else
-    warn "Adoptium no publico checksum; se continua sin verificar"
+    err "Adoptium no publico checksum SHA-256: se aborta (use --insecure-download para forzar)"
+    rm -f "$dl/$file"; return 1
   fi
   local tmp="$DEVTOOLS/jdk/.extract.$$"
   rm -rf "$tmp"; mkdir -p "$tmp"
@@ -728,12 +739,23 @@ install_pg() {
   info "descargando PostgreSQL $ver ($jar) desde Maven Central"
   curl -fsSL --retry 3 --retry-delay 5 -o "$dl/$jar.part" "$base/$ver/$jar" || return 1
   mv -f "$dl/$jar.part" "$dl/$jar"
-  expect="$(curl -fsSL --retry 3 "$base/$ver/$jar.sha1" 2>/dev/null | awk '{print $1}')"
-  if [ -n "$expect" ]; then
-    sum="$(sha_file 1 "$dl/$jar")"
-    [ "$sum" = "$expect" ] || { err "SHA-1 del jar no coincide ($sum != $expect)"; rm -f "$dl/$jar"; return 1; }
-    ok "checksum SHA-1 de Maven Central verificado"
-    phase_note "PostgreSQL $ver descargado, SHA-1 verificado"
+  local algo verified=0
+  for algo in 512 256 1; do
+    expect="$(curl -fsSL --retry 3 "$base/$ver/$jar.sha$algo" 2>/dev/null | awk '{print $1}')"
+    [ -n "$expect" ] || continue
+    sum="$(sha_file "$algo" "$dl/$jar")"
+    [ "$sum" = "$expect" ] || { err "SHA-$algo del jar no coincide ($sum != $expect)"; rm -f "$dl/$jar"; return 1; }
+    ok "checksum SHA-$algo de Maven Central verificado"
+    phase_note "PostgreSQL $ver descargado, SHA-$algo verificado"
+    verified=1; break
+  done
+  if [ "$verified" -eq 0 ]; then
+    if [ "$INSECURE_DOWNLOAD" -eq 1 ]; then
+      warn "Maven Central no publico checksum; se continua SIN verificar (--insecure-download)"
+    else
+      err "Maven Central no publico checksum para $jar: se aborta (use --insecure-download para forzar)"
+      rm -f "$dl/$jar"; return 1
+    fi
   fi
   local dest="$DEVTOOLS/pgsql-$ver" tmp="$DEVTOOLS/.pgsql-extract.$$" txz
   rm -rf "$tmp"; mkdir -p "$tmp"
@@ -827,7 +849,7 @@ start_app() { # logfile
     export DB_URL="jdbc:postgresql://127.0.0.1:$PG_PORT/transfer_limits" DB_USERNAME=transfer DB_PASSWORD="$dbpw"
     export TRACING_SAMPLING_PROBABILITY=1.0
     [ -n "$otel" ] && export OTEL_EXPORTER_OTLP_ENDPOINT="$otel"
-    nohup "$JAVA_HOME/bin/java$EXE" -jar "$(native_path "$APP_JAR")" --server.port="$APP_PORT" \
+    nohup "$JAVA_HOME/bin/java$EXE" -jar "$(native_path "$APP_JAR")" --server.port="$APP_PORT" --server.address=127.0.0.1 \
       --logging.level.org.springframework.web.servlet.DispatcherServlet=DEBUG </dev/null >"$log" 2>&1 &
   )
   local t0 st=1; t0=$(now_s)
@@ -909,9 +931,20 @@ if [ "$EXIT_CODE" -eq 0 ]; then
             OTLP_HTTP_PORT="$(free_port $((OTLP_HTTP_PORT + 10)))"; BASE_URL="http://127.0.0.1:$APP_PORT"
           fi
         fi
-        warn "auto-reparacion: docker compose down -v y reintento"
-        phase_note "intento $try fallido -> down -v y reintento"
-        "${DC[@]}" down -v >>"$LOG_DIR/docker-down.log" 2>&1
+        if "${DC[@]}" logs app 2>/dev/null | grep -qE 'password authentication failed|FATAL: .*authentication'; then
+          warn "diagnostico: PostgreSQL rechaza la contrasena de .env (el volumen se creo con otra)."
+          warn "  Los datos NO se borran: restaure la contrasena original en .env o use --reset-db"
+          phase_note "intento $try: autenticacion BD rechazada (volumen con otra contrasena)"
+        fi
+        if [ "$RESET_DB" -eq 1 ]; then
+          warn "auto-reparacion: docker compose down -v (--reset-db: borra el volumen) y reintento"
+          phase_note "intento $try fallido -> down -v (--reset-db) y reintento"
+          "${DC[@]}" down -v >>"$LOG_DIR/docker-down.log" 2>&1
+        else
+          warn "auto-reparacion: docker compose down (conserva el volumen de datos) y reintento"
+          phase_note "intento $try fallido -> down y reintento"
+          "${DC[@]}" down >>"$LOG_DIR/docker-down.log" 2>&1
+        fi
         try=$((try + 1)); sleep $((try * 5))
       done
       [ $rt_ok -eq 1 ] || fatal "el stack docker compose no quedo saludable tras $RETRIES intentos" \
@@ -1410,6 +1443,11 @@ else
   cleanup_runtime
   phase_end OK
 fi
+
+# Los logs de la app pueden contener ids de cuenta en URIs (DEBUG de DispatcherServlet): se enmascaran.
+for f in "$LOG_DIR"/app*.log; do
+  [ -f "$f" ] && sed -E -i.bak 's#(/accounts/)[^/ ?"]*([^/ ?"]{4})#\1****\2#g' "$f" && rm -f "$f.bak"
+done
 
 # ---------------------------------------------------------------------- resumen --------------
 say ""

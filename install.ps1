@@ -30,6 +30,8 @@ param(
   [int]$Concurrency = 0,
   [string]$Report = '',
   [switch]$AiFix,
+  [switch]$ResetDb,
+  [switch]$InsecureDownload,
   [switch]$InstallPrerequisites,
   [switch]$InstallDocker,
   [switch]$Help,
@@ -129,6 +131,8 @@ else {
   if ($Concurrency -gt 0) { $shArgs.Add('--concurrency'); $shArgs.Add([string]$Concurrency) }
   if ($Report) { $shArgs.Add('--report'); $shArgs.Add(($Report -replace '\\', '/')) }
   if ($AiFix) { $shArgs.Add('--ai-fix') }
+  if ($ResetDb) { $shArgs.Add('--reset-db') }
+  if ($InsecureDownload) { $shArgs.Add('--insecure-download') }
 }
 foreach ($a in $PassThru) { if ($a) { $shArgs.Add($a) } }
 

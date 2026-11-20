@@ -100,7 +100,7 @@ cmd 0 Bash 'git stash push -m wip'
 cmd 0 PowerShell 'Get-ChildItem'
 
 echo "== protect-files.sh"
-file 0 '.env.example'
+file 2 '.env.example'
 file 2 '.env'
 file 2 '.env.local'
 file 2 '.env.production'
