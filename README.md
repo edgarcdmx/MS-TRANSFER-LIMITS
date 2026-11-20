@@ -18,7 +18,7 @@ siquiera bajo concurrencia (*race conditions*) el consumo supere el límite.
 > 🌐 **Demo Interactiva y Documentación Ejecutiva en Vivo:**  
 > Puedes probar la simulación completa de negocio y consultar el dossier de arquitectura y nivel directivo aquí:  
 > 👉 **[https://edgar-ia-expert.web.app/Banamex_Caso_Practico.html](https://edgar-ia-expert.web.app/Banamex_Caso_Practico.html)**  
-> **Banco:** Banamex | **Cliente Titular:** Edgar Rosas Aamaro | **Cuenta:** `8840-3101`
+> **Banco:** Banamex | **Cliente Titular:** Edgar Rosas Amaro | **Cuenta:** `8840-3101`
 
 ---
 
@@ -154,7 +154,7 @@ La aplicación lee la conexión de variables de entorno. **`DB_PASSWORD` no tien
 
 ```bash
 # PostgreSQL 18 y Jaeger con compose (o una instancia propia de PostgreSQL)
-cp .env.example .env              # y edita las credenciales
+cp env.example .env              # y edita las credenciales
 docker compose up -d postgres jaeger
 
 export DB_URL=jdbc:postgresql://localhost:5432/transfer_limits
@@ -167,7 +167,7 @@ semilla: primero se configura un límite con `PUT` (ver ejemplos).
 
 ### 4. Ejecutar todo con Docker Compose
 ```bash
-cp .env.example .env              # credenciales de PostgreSQL usadas por compose
+cp env.example .env              # credenciales de PostgreSQL usadas por compose
 docker compose up --build
 ```
 | Servicio | URL |
@@ -584,7 +584,7 @@ MS-TRANSFER-LIMITS/
 
 ## 👤 Información del Proyecto
 * **Organización:** Banamex • Dirección de Arquitectura & Ingeniería
-* **Autor / Responsable:** Edgar Rosas Aamaro
+* **Autor / Responsable:** Edgar Rosas Amaro
 * **Repositorio Oficial:** [https://github.com/edgarcdmx/MS-TRANSFER-LIMITS](https://github.com/edgarcdmx/MS-TRANSFER-LIMITS)
 * **Demo Pública:** [https://edgar-ia-expert.web.app/Banamex_Caso_Practico.html](https://edgar-ia-expert.web.app/Banamex_Caso_Practico.html)
 * **Prompt maestro del enjambre:** [`PROMPT_ENJAMBRE.md`](PROMPT_ENJAMBRE.md)
