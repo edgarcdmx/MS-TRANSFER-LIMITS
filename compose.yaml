@@ -1,7 +1,8 @@
 # Local stack: PostgreSQL 18 + Jaeger v2 (OTLP receiver and UI) + the service.
 #   cp env.example .env   # then set a real POSTGRES_PASSWORD (required, no default)
 #   docker compose up --build
-# Published ports are bound to 127.0.0.1 only (not reachable from the network).
+# Published ports are bound to 127.0.0.1 only (not reachable from the network). Host ports can be
+# overridden with APP_PORT, POSTGRES_PORT, JAEGER_UI_PORT, OTLP_GRPC_PORT, OTLP_HTTP_PORT (install.sh does).
 #   API / Swagger UI: http://localhost:8080/swagger-ui.html
 #   Jaeger UI:        http://localhost:16686
 name: ms-transfer-limits
@@ -14,7 +15,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-transfer}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (see env.example)}
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       # PostgreSQL 18 images keep data under /var/lib/postgresql/<major>/; mount the parent.
       - postgres-data:/var/lib/postgresql
@@ -32,9 +33,9 @@ services:
       # Already the image default; explicit so OTLP listens on the compose network.
       JAEGER_LISTEN_HOST: 0.0.0.0
     ports:
-      - "127.0.0.1:16686:16686" # UI
-      - "127.0.0.1:4317:4317" # OTLP gRPC
-      - "127.0.0.1:4318:4318" # OTLP HTTP
+      - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686" # UI
+      - "127.0.0.1:${OTLP_GRPC_PORT:-4317}:4317" # OTLP gRPC
+      - "127.0.0.1:${OTLP_HTTP_PORT:-4318}:4318" # OTLP HTTP
     restart: unless-stopped
 
   app:
@@ -51,7 +52,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       TRACING_SAMPLING_PROBABILITY: "1.0"
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
