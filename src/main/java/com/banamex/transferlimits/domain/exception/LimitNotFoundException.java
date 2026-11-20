@@ -20,7 +20,7 @@ public class LimitNotFoundException extends DomainException {
    * @param channel channel without a configured limit
    */
   public LimitNotFoundException(String accountId, Channel channel) {
-    super("Account " + accountId + " has no limit configured for channel " + channel);
+    super("No limit configured for channel " + channel);
     this.accountId = accountId;
     this.channel = channel;
   }

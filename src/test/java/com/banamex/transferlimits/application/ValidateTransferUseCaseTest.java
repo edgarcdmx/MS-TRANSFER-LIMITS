@@ -95,6 +95,15 @@ class ValidateTransferUseCaseTest {
     return keyValue == null ? null : keyValue.getValue();
   }
 
+  /** Span attributes and the recorded exception are exported; they must not carry the account. */
+  private void assertNoAccountIdInObservation() {
+    Observation.Context context = observations.last();
+    assertThat(context.getError().getMessage()).doesNotContain(ACCOUNT);
+    assertThat(context.getAllKeyValues())
+        .isNotEmpty()
+        .noneMatch(keyValue -> keyValue.getValue().contains(ACCOUNT));
+  }
+
   @Test
   void approvesAndConsumesWhenWithinLimits() {
     when(consumptionRepository.tryConsume(
@@ -198,6 +207,7 @@ class ValidateTransferUseCaseTest {
     assertThat(lowKey(ValidateTransferUseCase.DECISION_KEY)).isEqualTo("LIMIT_NOT_FOUND");
     assertThat(lowKey(ValidateTransferUseCase.CHANNEL_KEY)).isEqualTo("BRANCH");
     assertThat(observations.last().getError()).isInstanceOf(LimitNotFoundException.class);
+    assertNoAccountIdInObservation();
   }
 
   @Test
@@ -229,6 +239,8 @@ class ValidateTransferUseCaseTest {
             });
     verifyNoInteractions(limitRepository, consumptionRepository);
     assertThat(lowKey(ValidateTransferUseCase.DECISION_KEY)).isEqualTo("TRANSFER_ID_CONFLICT");
+    assertThat(observations.last().getError()).isInstanceOf(TransferIdConflictException.class);
+    assertNoAccountIdInObservation();
   }
 
   @Test

@@ -96,7 +96,10 @@ paths:
         '400':
           $ref: '#/components/responses/ValidationError'
         '409':
-          description: Otra solicitud modificó el mismo límite de forma concurrente (`CONCURRENT_UPDATE`); reintentar.
+          description: |
+            Otra solicitud modificó o creó el mismo límite de forma concurrente (`CONCURRENT_UPDATE`;
+            bloqueo optimista perdido o violación de unicidad, SQLState 23505); reintentar. Otras
+            violaciones de integridad de datos responden 500 `INTERNAL_ERROR`.
           content:
             application/problem+json:
               schema:
@@ -185,8 +188,9 @@ paths:
         '409':
           description: |
             El `transferId` ya fue usado con un payload distinto (`TRANSFER_ID_CONFLICT`), o un
-            conflicto concurrente de persistencia impidió completar la operación
-            (`CONCURRENT_UPDATE`; reintentar).
+            conflicto concurrente de persistencia (bloqueo optimista perdido o violación de
+            unicidad, SQLState 23505) impidió completar la operación (`CONCURRENT_UPDATE`;
+            reintentar). Otras violaciones de integridad de datos responden 500 `INTERNAL_ERROR`.
           content:
             application/problem+json:
               schema:

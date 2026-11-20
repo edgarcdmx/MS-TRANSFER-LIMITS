@@ -37,6 +37,7 @@ names, SQL or stack traces.
 | `ACCOUNT_LIMITS_NOT_FOUND` | 404 | `account-limits-not-found` | Límites no encontrados | GET limits for an account with no configured channels. |
 | `LIMIT_NOT_FOUND` | 404 | `limit-not-found` | Límite no encontrado | Transfer validation for an account/channel without a configured limit. |
 | `TRANSFER_ID_CONFLICT` | 409 | `transfer-id-conflict` | Conflicto de transferId | Same `transferId` replayed with a different account/channel/amount (an identical replay returns the original result with 200). |
+| `CONCURRENT_UPDATE` | 409 | `concurrent-update` | Actualización concurrente | `OptimisticLockingFailureException` (incl. `ObjectOptimisticLockingFailureException`), `DuplicateKeyException`, or `DataIntegrityViolationException` whose cause chain has SQLState `23505` (unique violation). Any other `DataIntegrityViolationException` is `INTERNAL_ERROR` (logs SQLState + class only). |
 | `INVALID_LIMIT_CONFIGURATION` | 422 | `invalid-limit-configuration` | Configuración de límite inválida | PUT limit with `perOperationLimit > dailyLimit` (or other cross-field rule). |
 | `PER_OPERATION_LIMIT_EXCEEDED` | 422 | `per-operation-limit-exceeded` | Límite por operación excedido | `amount > perOperationLimit`; recorded as REJECTED, no consumption. Message template in `rejections.properties`. |
 | `DAILY_LIMIT_EXCEEDED` | 422 | `daily-limit-exceeded` | Límite diario excedido | Atomic conditional UPDATE affected 0 rows (`consumed + amount > dailyLimit`). Message template in `rejections.properties`. |

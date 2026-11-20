@@ -1,9 +1,11 @@
 package com.banamex.transferlimits.config.observability;
 
+import com.banamex.transferlimits.infrastructure.observability.MaskingServerRequestObservationConvention;
 import io.micrometer.observation.ObservationPredicate;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.server.observation.ServerRequestObservationContext;
+import org.springframework.http.server.observation.ServerRequestObservationConvention;
 
 /** Observation tuning shared by tracing and metrics. */
 @Configuration(proxyBeanMethods = false)
@@ -25,5 +27,16 @@ public class ObservabilityConfig {
       }
       return true;
     };
+  }
+
+  /**
+   * HTTP server convention picked up by Spring Boot's Web MVC observation auto-configuration: it
+   * masks the account id in the {@code http.url} span attribute ({@code ****} + last 4 chars).
+   *
+   * @return the masking convention
+   */
+  @Bean
+  ServerRequestObservationConvention maskingServerRequestObservationConvention() {
+    return new MaskingServerRequestObservationConvention();
   }
 }

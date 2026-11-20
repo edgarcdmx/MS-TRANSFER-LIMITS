@@ -129,14 +129,24 @@ Configured in `.claude/settings.json`; scripts in `scripts/hooks/` (bash, run by
 
 | Event | Script | Behaviour |
 |---|---|---|
-| PreToolUse `Bash\|PowerShell` | `pre-push-gate.sh` | If the command contains `git push`: runs `scripts/quality-gate.sh`, then requires `target/review/REVIEW_OK` == `HEAD`. Otherwise exits 0 immediately. Failure = exit 2 = tool call **blocked**, reason on stderr. |
-| PreToolUse `Edit\|Write\|MultiEdit\|NotebookEdit` | `protect-files.sh` | Blocks writes to `.env*`, `*.pem`, `*.key`, anything under `target/` or `.git/` (exit 2). |
+| PreToolUse `Bash\|PowerShell` | `pre-push-gate.sh` | If the command is a git push (normalized: quotes stripped, line continuations joined, `git`/`git.exe` with any path, `-C`/`-c` options, any case): first requires `target/review/REVIEW_OK` == `HEAD` (fail fast), then runs `scripts/quality-gate.sh`. Blocks outright: `--no-verify` anywhere, `core.hooksPath` or `alias.` together with `push`, `eval`/`Invoke-Expression` or `$VAR`/`$(...)` expansion followed by `push`. Otherwise exits 0 immediately. Failure = exit 2 = tool call **blocked**, reason on stderr. |
+| PreToolUse `Edit\|Write\|MultiEdit\|NotebookEdit` | `protect-files.sh` | Blocks writes to `.env*` (only the placeholder template `.env.example` is allowed), `*.pem`, `*.key`, anything under `target/` or `.git/` (exit 2). |
 | PostToolUse `Edit\|Write\|MultiEdit` | `format-java.sh` | For `.java` files runs `./mvnw -q spotless:apply -DspotlessFiles=<file regex>`. Never fails the edit. Re-read a file before editing it again: the hook may have reformatted it. |
 | Stop | `remind-gate.sh` | Non-blocking reminder (`systemMessage`) when Java changed and HEAD has no approval. |
 
-Native git hook: `.githooks/pre-push` runs the same gate + approval check for pushes made outside
-Claude Code (activate with `bash scripts/install-hooks.sh`). When a hook blocks you, fix the cause;
-never try to work around it.
+Native git hook: `.githooks/pre-push` requires every pushed commit (each local sha on stdin) to be
+the one in `REVIEW_OK` and that to be `HEAD`, then runs the gate, for pushes made outside Claude Code
+(activate with `bash scripts/install-hooks.sh`). `settings.json` also denies the GitHub MCP write
+tools that would bypass git hooks (`push_files`, `create_or_update_file`, `delete_file`,
+`merge_pull_request`). Regression tests: `bash scripts/hooks/test-hooks.sh`. When a hook blocks you,
+fix the cause; never try to work around it.
+
+**Hooks are guardrails, not a security boundary.** They stop accidental and casual bypasses, but
+command detection is heuristic: indirection such as variables (`G=git; $G push`), `eval`, encoded
+strings, aliases defined in an earlier command, or a script written to disk and executed cannot be
+detected reliably (the common forms are blocked heuristically; the rest is residual risk). Real
+enforcement must live on the remote: GitHub branch protection on `main` with required CI status
+checks (`./mvnw -B verify`) and required reviews.
 
 ## Skills and subagent
 

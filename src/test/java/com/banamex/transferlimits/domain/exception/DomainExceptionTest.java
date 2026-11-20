@@ -17,7 +17,8 @@ class DomainExceptionTest {
     assertThat(exception.code()).isEqualTo("ACCOUNT_LIMITS_NOT_FOUND");
     assertThat(exception.code()).isEqualTo(AccountLimitsNotFoundException.CODE);
     assertThat(exception.accountId()).isEqualTo("ACC-404");
-    assertThat(exception).hasMessage("Account ACC-404 has no limits configured");
+    assertThat(exception).hasMessage("Account has no limits configured");
+    assertThat(exception.getMessage()).doesNotContain("ACC-404");
   }
 
   @Test
@@ -29,7 +30,8 @@ class DomainExceptionTest {
     assertThat(exception.code()).isEqualTo(LimitNotFoundException.CODE);
     assertThat(exception.accountId()).isEqualTo("ACC-1");
     assertThat(exception.channel()).isEqualTo(Channel.BRANCH);
-    assertThat(exception).hasMessage("Account ACC-1 has no limit configured for channel BRANCH");
+    assertThat(exception).hasMessage("No limit configured for channel BRANCH");
+    assertThat(exception.getMessage()).doesNotContain("ACC-1");
   }
 
   @Test
@@ -46,6 +48,7 @@ class DomainExceptionTest {
     assertThat(exception.dailyLimit()).isEqualTo(BigDecimal.ONE);
     assertThat(exception.perOperationLimit()).isEqualTo(BigDecimal.TEN);
     assertThat(exception).hasMessage("bad");
+    assertThat(exception.getMessage()).doesNotContain("ACC-1");
   }
 
   @Test
@@ -60,5 +63,6 @@ class DomainExceptionTest {
     assertThat(exception.transferId()).isEqualTo(transferId);
     assertThat(exception.accountId()).isEqualTo("ACC-1");
     assertThat(exception).hasMessageContaining(transferId.toString());
+    assertThat(exception.getMessage()).doesNotContain("ACC-1");
   }
 }

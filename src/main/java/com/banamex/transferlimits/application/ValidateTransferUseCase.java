@@ -50,7 +50,9 @@ import org.springframework.transaction.support.TransactionOperations;
  *
  * <p>The execution is wrapped in the {@code transfer.validation} Micrometer observation (exported
  * as an OpenTelemetry span) with the low-cardinality keys {@code channel}, {@code decision}
- * (APPROVED, REJECTED or the error code) and {@code replayed}.
+ * (APPROVED, REJECTED or the error code) and {@code replayed}. The account id is never recorded:
+ * the only high-cardinality key is {@code transfer.id}, and the exception recorded by {@link
+ * Observation#observe} on failure carries an account-free message (see {@link DomainException}).
  */
 @Service
 public class ValidateTransferUseCase {

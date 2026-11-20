@@ -1,5 +1,7 @@
 # Local stack: PostgreSQL 18 + Jaeger v2 (OTLP receiver and UI) + the service.
+#   cp .env.example .env   # then set a real POSTGRES_PASSWORD (required, no default)
 #   docker compose up --build
+# Published ports are bound to 127.0.0.1 only (not reachable from the network).
 #   API / Swagger UI: http://localhost:8080/swagger-ui.html
 #   Jaeger UI:        http://localhost:16686
 name: ms-transfer-limits
@@ -9,10 +11,10 @@ services:
     image: postgres:18-alpine
     environment:
       POSTGRES_DB: transfer_limits
-      POSTGRES_USER: transfer
-      POSTGRES_PASSWORD: transfer
+      POSTGRES_USER: ${POSTGRES_USER:-transfer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (see .env.example)}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       # PostgreSQL 18 images keep data under /var/lib/postgresql/<major>/; mount the parent.
       - postgres-data:/var/lib/postgresql
@@ -30,9 +32,9 @@ services:
       # Already the image default; explicit so OTLP listens on the compose network.
       JAEGER_LISTEN_HOST: 0.0.0.0
     ports:
-      - "16686:16686" # UI
-      - "4317:4317" # OTLP gRPC
-      - "4318:4318" # OTLP HTTP
+      - "127.0.0.1:16686:16686" # UI
+      - "127.0.0.1:4317:4317" # OTLP gRPC
+      - "127.0.0.1:4318:4318" # OTLP HTTP
     restart: unless-stopped
 
   app:
@@ -43,13 +45,13 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: docker
       DB_URL: jdbc:postgresql://postgres:5432/transfer_limits
-      DB_USERNAME: transfer
-      DB_PASSWORD: transfer
+      DB_USERNAME: ${POSTGRES_USER:-transfer}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (see .env.example)}
       # Standard OTel variable (base URL); Spring Boot appends /v1/traces.
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       TRACING_SAMPLING_PROBABILITY: "1.0"
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       postgres:
         condition: service_healthy

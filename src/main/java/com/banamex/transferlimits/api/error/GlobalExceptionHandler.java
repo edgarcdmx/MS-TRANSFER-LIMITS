@@ -11,6 +11,7 @@ import com.banamex.transferlimits.domain.exception.TransferIdConflictException;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import java.net.URI;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -20,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.TypeMismatchException;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -72,6 +74,10 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
   static final String UNKNOWN_PROPERTY = "propiedad no permitida";
   static final String UNREADABLE_BODY = "el cuerpo de la solicitud falta o no es JSON válido";
 
+  /** PostgreSQL / SQL standard SQLState of a unique constraint violation. */
+  static final String UNIQUE_VIOLATION_SQL_STATE = "23505";
+
+  private static final int MAX_CAUSE_DEPTH = 32;
   private static final Logger LOG = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
   private final RejectionMessageFactory messages;
@@ -177,19 +183,57 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
   }
 
   /**
-   * 409 when a concurrent request modified the same resource (optimistic lock or unique key).
+   * 409 when a concurrent request modified the same resource (optimistic lock lost, including
+   * {@code ObjectOptimisticLockingFailureException}).
    *
    * @param ex persistence exception
    * @param request current request
    * @return the problem response
    */
-  @ExceptionHandler({
-    OptimisticLockingFailureException.class,
-    DataIntegrityViolationException.class
-  })
-  public ResponseEntity<Object> handleConcurrentUpdate(RuntimeException ex, WebRequest request) {
+  @ExceptionHandler(OptimisticLockingFailureException.class)
+  public ResponseEntity<Object> handleOptimisticLockingFailure(
+      OptimisticLockingFailureException ex, WebRequest request) {
     LOG.warn("Concurrent update conflict: {}", ex.getClass().getName());
     return respond(problem(ProblemType.CONCURRENT_UPDATE, messages.concurrentUpdate(), request));
+  }
+
+  /**
+   * 409 when a concurrent insert of the same key won the race (unique violation, SQLState {@value
+   * #UNIQUE_VIOLATION_SQL_STATE}, or {@link DuplicateKeyException}); any other integrity violation
+   * (not null, foreign key, check...) is a server-side defect and answers a generic 500. Only the
+   * SQLState and the exception class are logged, never the message (it may contain row data).
+   *
+   * @param ex persistence exception
+   * @param request current request
+   * @return the problem response
+   */
+  @ExceptionHandler(DataIntegrityViolationException.class)
+  public ResponseEntity<Object> handleDataIntegrityViolation(
+      DataIntegrityViolationException ex, WebRequest request) {
+    String sqlState = sqlState(ex);
+    if (ex instanceof DuplicateKeyException || UNIQUE_VIOLATION_SQL_STATE.equals(sqlState)) {
+      LOG.warn("Concurrent insert conflict: {} (SQLState {})", ex.getClass().getName(), sqlState);
+      return respond(problem(ProblemType.CONCURRENT_UPDATE, messages.concurrentUpdate(), request));
+    }
+    LOG.error("Data integrity violation: {} (SQLState {})", ex.getClass().getName(), sqlState);
+    return respond(problem(ProblemType.INTERNAL_ERROR, messages.internalError(), request));
+  }
+
+  /**
+   * First non-null {@link SQLException#getSQLState()} found walking the cause chain.
+   *
+   * @param ex exception to inspect
+   * @return the SQLState, or {@code null} if no SQL exception carries one
+   */
+  static String sqlState(Throwable ex) {
+    Throwable current = ex;
+    for (int depth = 0; current != null && depth < MAX_CAUSE_DEPTH; depth++) {
+      if (current instanceof SQLException sqlException && sqlException.getSQLState() != null) {
+        return sqlException.getSQLState();
+      }
+      current = current.getCause();
+    }
+    return null;
   }
 
   /**

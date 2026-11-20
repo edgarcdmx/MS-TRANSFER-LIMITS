@@ -13,6 +13,7 @@ import jakarta.validation.Validator;
 import jakarta.validation.ValidatorFactory;
 import java.math.BigDecimal;
 import java.net.URI;
+import java.sql.SQLException;
 import java.util.Optional;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.AfterEach;
@@ -55,6 +56,33 @@ class GlobalExceptionHandlerTest {
   @AfterEach
   void tearDown() {
     validatorFactory.close();
+  }
+
+  @Test
+  void sqlStateIsTheFirstNonNullStateInTheCauseChain() {
+    SQLException withoutState = new SQLException("no state");
+    SQLException unique = new SQLException("dup", "23505");
+    withoutState.initCause(unique);
+
+    assertThat(GlobalExceptionHandler.sqlState(new RuntimeException("outer", withoutState)))
+        .isEqualTo(GlobalExceptionHandler.UNIQUE_VIOLATION_SQL_STATE);
+    assertThat(GlobalExceptionHandler.sqlState(new SQLException("x", "23502"))).isEqualTo("23502");
+  }
+
+  @Test
+  void sqlStateIsNullWithoutSqlExceptions() {
+    assertThat(GlobalExceptionHandler.sqlState(null)).isNull();
+    assertThat(GlobalExceptionHandler.sqlState(new RuntimeException("x"))).isNull();
+    assertThat(GlobalExceptionHandler.sqlState(new SQLException("no state"))).isNull();
+  }
+
+  @Test
+  void sqlStateStopsOnCyclicCauseChains() {
+    RuntimeException first = new RuntimeException("first");
+    RuntimeException second = new RuntimeException("second", first);
+    first.initCause(second);
+
+    assertThat(GlobalExceptionHandler.sqlState(first)).isNull();
   }
 
   @Test

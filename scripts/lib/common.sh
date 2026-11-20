@@ -17,6 +17,74 @@ json_string_field() {
     | sed -e 's/\\\\/\x01/g' -e 's/\\"/"/g' -e 's/\\[nrt]/ /g' -e 's/\\\//\//g' -e 's/\x01/\\/g'
 }
 
+# ---------------------------------------------------------------------------------------------
+# git push detection for the Claude Code PreToolUse hook (Bash and PowerShell tools).
+# These are GUARDRAILS against accidental or casual bypasses, not a security boundary: a shell
+# command can always be obfuscated (variables, eval, encoded strings, scripts written to disk).
+# Real enforcement is GitHub branch protection + required CI checks on the remote.
+# ---------------------------------------------------------------------------------------------
+
+# Print normalized variants of a command ($1), one per line (pure bash, no forks):
+#   1. CR/LF/TAB -> space; backslash or backtick line continuations joined; quotes (' " `)
+#      removed; other backslashes turned into '/' (C:\Git\cmd\git.exe -> C:/Git/cmd/git.exe);
+#   2. same, but every remaining backslash deleted (shell escapes: g\it -> git).
+# A match in any variant counts.
+normalize_command_variants() {
+  local base="${1//[$'\r\n\t']/ }"
+  base="${base//\\ / }"
+  base="${base//\` / }"
+  base="${base//[\"\'\`]/}"
+  printf '%s\n' "${base//\\//}" "${base//\\/}"
+}
+
+# git (or git.exe, optionally with a path prefix), then global options (-C dir, -c k=v,
+# --git-dir x, --no-pager, -P ...), then the push subcommand.
+GIT_PUSH_RE='(^|[^[:alnum:]_.-])git(\.exe)?([[:space:]]+-[Cc][[:space:]]+[^[:space:]]+|[[:space:]]+--(git-dir|work-tree|namespace|exec-path|config-env|super-prefix)[[:space:]]+[^[:space:]]+|[[:space:]]+--?[[:alnum:]-]+(=[^[:space:]]*)?)*[[:space:]]+push([[:space:]]|$|[;&|)<>])'
+# "push" as a standalone word (not pushy, push-later, git-push-x).
+PUSH_WORD_RE='(^|[^[:alnum:]_.-])push([^[:alnum:]_-]|$)'
+NO_VERIFY_RE='--no-verify'
+HOOKS_PATH_RE='core\.hookspath'
+ALIAS_RE='(^|[^[:alnum:]_])alias\.'
+EVAL_RE='(^|[^[:alnum:]_-])(eval|invoke-expression|iex)([^[:alnum:]_-]|$)'
+EXPANSION_PUSH_RE='\$[({]?[[:alnum:]_:]*[)}]?[^;&|]*[[:space:]]push([^[:alnum:]_-]|$)'
+
+# Returns 0 if any normalized variant in $1 (newline separated, already lower-cased) matches $2.
+_any_variant_matches() {
+  local line
+  while IFS= read -r line; do
+    [[ $line =~ $2 ]] && return 0
+  done <<<"$1"
+  return 1
+}
+
+# Classify a raw command string ($1). Prints one of:
+#   none                - not a push, nothing to do
+#   push                - a git push: require the approval and run the gate
+#   forbidden:<reason>  - a push form that evades the native hooks or cannot be analysed
+classify_git_command() {
+  local variants
+  variants="$(normalize_command_variants "$1")"
+  # git and PowerShell are case-insensitive on Windows (GIT.EXE works): compare lower-cased.
+  variants="${variants,,}"
+  if _any_variant_matches "$variants" "$NO_VERIFY_RE"; then
+    echo "forbidden:--no-verify skips the git hooks"
+  elif ! _any_variant_matches "$variants" "$PUSH_WORD_RE"; then
+    echo "none"
+  elif _any_variant_matches "$variants" "$HOOKS_PATH_RE"; then
+    echo "forbidden:overriding core.hooksPath together with push disables the native pre-push hook"
+  elif _any_variant_matches "$variants" "$ALIAS_RE"; then
+    echo "forbidden:git aliases that wrap push hide it from the gate"
+  elif _any_variant_matches "$variants" "$EVAL_RE"; then
+    echo "forbidden:eval/Invoke-Expression together with push cannot be analysed"
+  elif _any_variant_matches "$variants" "$EXPANSION_PUSH_RE"; then
+    echo "forbidden:variable or command expansion followed by push cannot be analysed"
+  elif _any_variant_matches "$variants" "$GIT_PUSH_RE"; then
+    echo "push"
+  else
+    echo "none"
+  fi
+}
+
 # Convert a Windows path (C:\foo\bar) to forward slashes (C:/foo/bar). Idempotent on POSIX paths.
 to_slashes() { printf '%s' "$1" | sed 's#\\#/#g'; }
 
@@ -69,6 +137,25 @@ ensure_java() {
 
 # SHA of HEAD for the repo at $1 (default: cwd).
 head_sha() { git -C "${1:-.}" rev-parse HEAD 2>/dev/null; }
+
+# Returns 0 if target/review/REVIEW_OK in repo $1 contains exactly the SHA $2.
+# On failure prints the reason to stderr.
+review_ok_matches_sha() {
+  local root="$1" sha="$2" marker content
+  marker="$root/target/review/REVIEW_OK"
+  if [ ! -f "$marker" ]; then
+    qg_err "BLOCKED: reviewer approval missing ($marker not found)."
+    qg_err "  Run the 'code-security-reviewer' subagent on this branch; it writes REVIEW_OK only when APPROVED."
+    return 1
+  fi
+  content="$(tr -d '[:space:]' <"$marker")"
+  if [ -z "$sha" ] || [ "$content" != "$sha" ]; then
+    qg_err "BLOCKED: REVIEW_OK approves ${content:-<empty>}, but ${sha:-<unknown>} is being pushed."
+    qg_err "  Only the reviewed commit can be pushed: re-run the 'code-security-reviewer' subagent."
+    return 1
+  fi
+  return 0
+}
 
 # Returns 0 if target/review/REVIEW_OK in repo $1 contains exactly the current HEAD SHA.
 # On failure prints the reason to stderr.

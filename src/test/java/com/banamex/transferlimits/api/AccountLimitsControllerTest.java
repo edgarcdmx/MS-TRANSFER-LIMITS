@@ -29,6 +29,7 @@ import com.banamex.transferlimits.domain.AccountLimits;
 import com.banamex.transferlimits.domain.Channel;
 import com.banamex.transferlimits.domain.exception.AccountLimitsNotFoundException;
 import com.banamex.transferlimits.domain.exception.InvalidLimitConfigurationException;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +38,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.MediaType;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -328,11 +331,65 @@ class AccountLimitsControllerTest {
   }
 
   @Test
-  void putLosingAnInsertRaceIsConflict() throws Exception {
+  void putLosingAnOptimisticLockWithThePlainSpringExceptionIsConflict() throws Exception {
     given(updateChannelLimitUseCase.execute(anyString(), any(Channel.class), any(), any(), any()))
-        .willThrow(new DataIntegrityViolationException("duplicate key value pk_secret_table"));
+        .willThrow(new OptimisticLockingFailureException("row secret was updated"));
 
     assertConcurrentUpdate();
+  }
+
+  @Test
+  void putLosingAnInsertRaceIsConflict() throws Exception {
+    given(updateChannelLimitUseCase.execute(anyString(), any(Channel.class), any(), any(), any()))
+        .willThrow(
+            new DataIntegrityViolationException(
+                "could not execute statement",
+                new IllegalStateException(
+                    "wrapper", new SQLException("duplicate key value pk_secret_table", "23505"))));
+
+    assertConcurrentUpdate();
+  }
+
+  @Test
+  void putWithDuplicateKeyExceptionIsConflict() throws Exception {
+    given(updateChannelLimitUseCase.execute(anyString(), any(Channel.class), any(), any(), any()))
+        .willThrow(new DuplicateKeyException("duplicate key value pk_secret_table"));
+
+    assertConcurrentUpdate();
+  }
+
+  @Test
+  void putWithNonUniqueIntegrityViolationIsInternalError() throws Exception {
+    given(updateChannelLimitUseCase.execute(anyString(), any(Channel.class), any(), any(), any()))
+        .willThrow(
+            new DataIntegrityViolationException(
+                "null value in column secret_column",
+                new SQLException("null value in column secret_column", "23502")));
+
+    assertIntegrityViolationIsInternalError();
+  }
+
+  @Test
+  void putWithIntegrityViolationWithoutSqlStateIsInternalError() throws Exception {
+    given(updateChannelLimitUseCase.execute(anyString(), any(Channel.class), any(), any(), any()))
+        .willThrow(new DataIntegrityViolationException("secret constraint broken"));
+
+    assertIntegrityViolationIsInternalError();
+  }
+
+  private void assertIntegrityViolationIsInternalError() throws Exception {
+    mockMvc
+        .perform(
+            put(CHANNEL_URL, ACCOUNT_ID, "MOBILE_APP")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(VALID_BODY))
+        .andExpect(status().isInternalServerError())
+        .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+        .andExpect(jsonPath("$.type").value("https://api.banamex.example/problems/internal-error"))
+        .andExpect(jsonPath("$.status").value(500))
+        .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+        .andExpect(content().string(not(containsString("secret"))))
+        .andExpect(content().string(not(containsString("23502"))));
   }
 
   @Test

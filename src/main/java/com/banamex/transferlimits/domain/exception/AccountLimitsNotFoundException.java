@@ -16,7 +16,7 @@ public class AccountLimitsNotFoundException extends DomainException {
    * @param accountId account without limits
    */
   public AccountLimitsNotFoundException(String accountId) {
-    super("Account " + accountId + " has no limits configured");
+    super("Account has no limits configured");
     this.accountId = accountId;
   }
 

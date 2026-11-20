@@ -11,7 +11,8 @@ public abstract class DomainException extends RuntimeException {
   /**
    * Creates the exception.
    *
-   * @param message technical message (not shown to clients as-is)
+   * @param message technical message (not shown to clients as-is). It ends up in exported spans and
+   *     logs, so it must never contain account identifiers or other customer data
    */
   protected DomainException(String message) {
     super(message);
