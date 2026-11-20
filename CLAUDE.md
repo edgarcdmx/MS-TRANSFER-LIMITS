@@ -130,7 +130,7 @@ Configured in `.claude/settings.json`; scripts in `scripts/hooks/` (bash, run by
 | Event | Script | Behaviour |
 |---|---|---|
 | PreToolUse `Bash\|PowerShell` | `pre-push-gate.sh` | If the command is a git push (normalized: quotes stripped, line continuations joined, `git`/`git.exe` with any path, `-C`/`-c` options, any case): first requires `target/review/REVIEW_OK` == `HEAD` (fail fast), then runs `scripts/quality-gate.sh`. Blocks outright: `--no-verify` anywhere, `core.hooksPath` or `alias.` together with `push`, `eval`/`Invoke-Expression` or `$VAR`/`$(...)` expansion followed by `push`. Otherwise exits 0 immediately. Failure = exit 2 = tool call **blocked**, reason on stderr. |
-| PreToolUse `Edit\|Write\|MultiEdit\|NotebookEdit` | `protect-files.sh` | Blocks writes to `.env*` (only the placeholder template `env.example` is allowed), `*.pem`, `*.key`, anything under `target/` or `.git/` (exit 2). |
+| PreToolUse `Edit\|Write\|MultiEdit\|NotebookEdit` | `protect-files.sh` | Blocks writes to `.env*` (the placeholder template lives in `env.example`, outside that pattern), `*.pem`, `*.key`, anything under `target/` or `.git/` (exit 2). |
 | PostToolUse `Edit\|Write\|MultiEdit` | `format-java.sh` | For `.java` files runs `./mvnw -q spotless:apply -DspotlessFiles=<file regex>`. Never fails the edit. Re-read a file before editing it again: the hook may have reformatted it. |
 | Stop | `remind-gate.sh` | Non-blocking reminder (`systemMessage`) when Java changed and HEAD has no approval. |
 
