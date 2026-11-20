@@ -115,6 +115,79 @@ registrados, de modo que una divergencia rompe `./mvnw verify`.
 
 ## 🚀 Pasos para Ejecutar el Proyecto
 
+### ⚡ Opción A — Instalación automática con demo y reporte (recomendada)
+
+Un solo comando instala lo que falte, compila, verifica la instalación, ejecuta una **demo de todos
+los requisitos** y genera un **reporte detallado**. Si algo falla, intenta repararlo y reintenta.
+
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/edgarcdmx/MS-TRANSFER-LIMITS.git
+cd MS-TRANSFER-LIMITS
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+# Equipo sin Git Bash: agrega -InstallPrerequisites (instala Git con winget)
+# Para usar Docker y Jaeger:  -InstallDocker  (instala Docker Desktop con winget)
+```
+
+**Linux / macOS / Git Bash:**
+```bash
+git clone https://github.com/edgarcdmx/MS-TRANSFER-LIMITS.git
+cd MS-TRANSFER-LIMITS
+./install.sh                      # modo auto: Docker si está disponible, si no PostgreSQL portable
+```
+
+**Qué hace `install.sh`, fase por fase:**
+
+| Fase | Acción | Auto-reparación / reintentos |
+| :--- | :--- | :--- |
+| 0. Preflight | Detecta SO/arquitectura, git, curl, espacio en disco, proxy y puertos libres | Si 8080/5432 están ocupados, elige el siguiente puerto libre |
+| 1. JDK 27 | Usa `JAVA_HOME`/`java` si es 27; si no, descarga **Temurin 27 portable** (Adoptium, SHA-256 verificado) en `~/.local/devtools/jdk` — sin permisos de administrador | Reintentos con *backoff* en la descarga |
+| 2. Build + gate | `./mvnw -B verify`: formato Google, Checkstyle, 267 pruebas, JaCoCo ≥ 90 % | Red/descargas → reintento con `-U`; `TMP` en otra unidad → reubica `java.io.tmpdir`; `target/` obsoleto → limpia y reintenta; formato/Checkstyle/cobertura → diagnóstico claro (no reformatea en silencio) |
+| 3. Runtime | **Docker:** genera `.env` con contraseña aleatoria desde `env.example` y `docker compose up -d --build` (PostgreSQL 18 + app + Jaeger). **Local (sin Docker):** descarga **PostgreSQL 18 portable** (binarios zonky de Maven Central, SHA-1 verificado), `initdb` + `pg_ctl` y arranca el jar | Espera health con timeout; si falla muestra logs, diagnostica (puerto, credenciales, Flyway), `down -v`/reinicio y reintenta |
+| 4. Demo R1–R14 | Ejecuta con `curl` la demo de **cada requisito original** (tabla abajo) | — |
+| 5. Reporte | Escribe `target/install-report/REPORTE_INSTALACION.md` con entorno, versiones, fases, evidencia por requisito y rutas de logs; resumen en consola | Código de salida `0` sólo si todo lo no omitido pasa |
+
+**Requisitos verificados por la demo:**
+
+| ID | Requisito | Cómo se verifica |
+| :--- | :--- | :--- |
+| R1 | Java 27 + Spring Boot 4.2.0 | Manifest del jar, JVM en el log, `pom.xml` |
+| R2 | Maven | `./mvnw verify` → BUILD SUCCESS |
+| R3 | Estilo Google | `spotless:check` + `checkstyle:check` sin violaciones |
+| R4 | Errores RFC 9457 | 400/404/409/422 con `application/problem+json` y `type/title/status/detail/instance/code/traceId` |
+| R5 | Trazas OpenTelemetry | Docker: trazas en la API de Jaeger. Local: `traceId` en respuestas, en logs y en spans exportados por OTLP |
+| R6 | Imagen Docker | Imagen construida, contenedor *healthy*, usuario no root (sólo modo Docker) |
+| R7 | Cobertura ≥ 90 % | `jacoco.csv` (líneas y ramas) |
+| R8 | Concurrencia | 40 POST en paralelo contra el límite diario → nunca se excede; 20 POST en paralelo con el mismo `transferId` → se consume una vez |
+| R9 | Contrato OpenAPI 3 | `/openapi/openapi.yaml` (3.1), `/v3/api-docs`, Swagger UI |
+| R10 | PostgreSQL + Flyway | Migración aplicada; datos e idempotencia sobreviven a un reinicio de la app |
+| R11 | Reglas de negocio | PUT ×3 canales, GET, POST 201 + `Location`, replay 200, 422 por operación y diario, 409, 400, 404 |
+| R12 | Apache Commons Text | Mensajes de rechazo con montos `es-MX` renderizados desde plantillas |
+| R13 | Harness | `CLAUDE.md`, settings, 4 skills, subagente, hooks + `scripts/hooks/test-hooks.sh` (52 casos de bloqueo de push) |
+| R14 | Salud | `/actuator/health` → `UP` |
+
+**Ejemplo real** (equipo Windows sin Docker, modo local): **13 PASS · 1 SKIPPED (R6, sin Docker) ·
+0 FAIL en 176 s** — ver [`docs/REPORTE_INSTALACION_EJEMPLO.md`](docs/REPORTE_INSTALACION_EJEMPLO.md).
+
+**Opciones útiles:**
+
+| Opción | Efecto |
+| :--- | :--- |
+| `--mode auto\|docker\|local` | Forzar Docker o PostgreSQL portable (por defecto `auto`) |
+| `--keep-running` / `--stop` | Dejar el servicio arriba (imprime URLs de API, Swagger y Jaeger) / detenerlo |
+| `--port N` | Puerto de la API |
+| `--retries N` | Reintentos por fase (por defecto 3) |
+| `--concurrency N` | Peticiones paralelas de la demo de concurrencia |
+| `--report RUTA` | Ruta del reporte Markdown |
+| `--skip-tests` | Omite pruebas y cobertura (R7 queda SKIPPED; sólo para demos rápidas) |
+| `--ai-fix` | Ante un error irrecuperable, si `claude` está instalado, le pide a Claude Code diagnosticar y corregir con el reporte |
+
+En PowerShell se usan los mismos parámetros con estilo PowerShell, p. ej.
+`.\install.ps1 -Mode docker -KeepRunning`. Códigos de salida: `0` éxito, `1` algún requisito falló,
+`2` la instalación no pudo recuperarse, `64` opciones inválidas.
+
+### 🛠 Opción B — Paso a paso manual
+
 ### Requisitos previos
 * **JDK 27** (Temurin 27). En Windows, por ejemplo:
   ```powershell
@@ -293,10 +366,11 @@ archivos que le pertenecían y los que no debía tocar.
 | **A3** Dominio + Persistencia | Dominio puro, puertos, adaptadores JPA, consumo atómico | `domain/**`, `infrastructure/**`, `db/migration/**` | Repo principal | Dominio, Flyway y `UPDATE … RETURNING` (`2824e15`) |
 | **A4** API web | Controllers, casos de uso, RFC 9457, Commons Text | `api/**`, `application/**`, `messages/**` | Repo principal (ola 2b) | API conforme al contrato (`684f81d`) |
 | **A5** Observabilidad + Docker | `application.yml`, OTel, contenedores | `config/**`, `application.yml`, `Dockerfile`, `compose.yaml`, `.dockerignore` | **Worktree** | OTel → Jaeger, imagen y compose (`dad6cf5`) |
-| **A6** Pruebas | Pruebas unitarias y de concurrencia | `src/test/**` | **Worktree** | 241 pruebas, 100 % líneas y ramas (`07193aa`) |
+| **A6** Pruebas | Pruebas unitarias y de concurrencia | `src/test/**` | **Worktree** | 186 pruebas del núcleo, 100 % líneas y ramas (`07193aa`) |
 | **A7** `code-security-reviewer` | Revisión de calidad y seguridad (sólo lectura) | — (sólo escribe `target/review/REVIEW_OK`) | Subagente del proyecto | **APPROVED**: 0 CRITICAL/HIGH, 4 MEDIUM |
-| **Remediación** | Corrección de los hallazgos MEDIUM del revisor | Archivos afectados por cada hallazgo | Repo principal | 4 MEDIUM corregidos; LOW documentados abajo |
+| **Remediación** | Corrección de los hallazgos MEDIUM del revisor | Archivos afectados por cada hallazgo | Repo principal | 4 MEDIUM corregidos (`fad1415`); LOW documentados abajo |
 | **A8** Documentación | Este README | `README.md` | Repo principal | README en español |
+| **A9** Instalador | Instalación automática, auto-reparación, demo R1–R14 y reporte | `install.sh`, `install.ps1`, `docs/REPORTE_INSTALACION_EJEMPLO.md` | Repo principal | 13 PASS · 1 SKIPPED · 0 FAIL (`d4ddd47`) |
 
 ```mermaid
 flowchart TD
@@ -315,27 +389,25 @@ flowchart TD
     A6 --> F3["Fase 3<br/>Integración en main · quality gate"]
     F3 --> A7["A7 code-security-reviewer"]
     A7 -->|4 MEDIUM| R["Agente de remediación"]
-    R --> F4["Fase 4<br/>A8 README · push por los hooks"]
+    R --> A9["A9 Instalador automático<br/>demo R1–R14 + reporte"]
+    A9 --> F4["Fase 4<br/>A8 README · revisión final · push por los hooks"]
 ```
 
 ### Servidores MCP (`.mcp.json`, sin secretos)
 
-| MCP | Uso previsto | Qué ocurrió en la sesión |
-| :--- | :--- | :--- |
-| `github` | Operaciones sobre el repo `edgarcdmx/MS-TRANSFER-LIMITS` | No pudo autenticarse porque el token (`GITHUB_PERSONAL_ACCESS_TOKEN`) se creó después de iniciar la sesión. La verificación/creación del repo se hizo con la **API REST de GitHub** usando el mismo token; finalmente el usuario creó el repo manualmente porque el token *fine-grained* no tenía el permiso *Administration*. |
-| `context7` | Documentación vigente de Spring Boot 4, springdoc, OTel, Commons Text | Configurado, pero **no conectó** en este entorno; la documentación se consultó con `fetch`. |
-| `fetch` | Lectura de documentación y verificación de versiones | Usado por los agentes para leer la documentación de Spring Boot 4.2, la de hooks de Claude Code, los tags de Docker Hub y las versiones en Maven Central. |
-
-El MCP `postgres` propuesto en el prompt maestro no se incluyó en `.mcp.json` (no había PostgreSQL
-en la máquina).
+| MCP | Uso |
+| :--- | :--- |
+| `github` | Operaciones sobre el repo `edgarcdmx/MS-TRANSFER-LIMITS`. Se autentica con la variable de entorno `GITHUB_PERSONAL_ACCESS_TOKEN` (nunca en archivos). Las herramientas de escritura que evitarían los hooks (`push_files`, `create_or_update_file`, `delete_file`, `merge_pull_request`) están denegadas en `settings.json`. |
+| `context7` | Documentación vigente de Spring Boot 4, springdoc, OpenTelemetry y Commons Text. |
+| `fetch` | Lectura de documentación (Spring Boot 4.2, hooks de Claude Code, tags de Docker Hub) y verificación de versiones en Maven Central / Adoptium. |
 
 ---
 
 ## 🧭 Estrategia Paso a Paso
 
-**Fase 0 — Entorno.** La máquina no tenía Java, Maven, `gh` ni Docker. Se instaló un **JDK 27
-portable fuera del repositorio** (`%USERPROFILE%\.local\devtools\jdk`) y se adoptó el **Maven
-Wrapper** (Maven 3.9.16). Las versiones se verificaron en Maven Central y Adoptium el
+**Fase 0 — Entorno.** Se preparó un **JDK 27 portable fuera del repositorio**
+(`%USERPROFILE%\.local\devtools\jdk`), se adoptó el **Maven Wrapper** (Maven 3.9.16) para no
+depender de un Maven global, se inicializó git y se conectó el repositorio de GitHub. Las versiones se verificaron en Maven Central y Adoptium el
 **2026-11-19** (Spring Boot 4.2.0, Commons Text 1.15.0, springdoc 3.2.0, Spotless 3.11.0,
 Checkstyle 14.4.0, JaCoCo 0.8.16).
 
@@ -354,8 +426,10 @@ los ADR-001/002/003. El contrato fue la fuente de verdad compartida por los dem�
 **0 CRITICAL/HIGH**; los **4 MEDIUM** los corrigió un agente de remediación y los **LOW** restantes
 se documentan en [Exclusiones y Limitaciones](#-exclusiones-y-limitaciones-conocidas).
 
-**Fase 4 — Entrega.** A8 actualizó este README y el push se hizo **pasando por los hooks** (gate +
-aprobación del revisor para `HEAD`), nunca con `--no-verify`.
+**Fase 4 — Instalación automática y entrega.** A9 creó `install.sh` / `install.ps1` y los probó de
+punta a punta en un equipo limpio sin Docker (13 PASS, 1 SKIPPED, 0 FAIL). A8 actualizó este README,
+el revisor volvió a aprobar el `HEAD` final y el push se hizo **pasando por los hooks** (gate +
+aprobación del revisor), nunca con `--no-verify`.
 
 ---
 
@@ -377,8 +451,8 @@ aprobación del revisor para `HEAD`), nunca con `--no-verify`.
 
 | Evento | Matcher | Script | Comportamiento |
 | :--- | :--- | :--- | :--- |
-| `PreToolUse` | `Bash\|PowerShell` | `pre-push-gate.sh` | Si el comando contiene `git push`: corre el gate y exige `target/review/REVIEW_OK` == `HEAD`; si falla, `exit 2` y la herramienta queda **bloqueada** con el motivo. Cualquier otro comando pasa de inmediato. |
-| `PreToolUse` | `Edit\|Write\|MultiEdit\|NotebookEdit` | `protect-files.sh` | Bloquea escrituras a `.env*`, `*.pem`, `*.key`, `target/` y `.git/`. |
+| `PreToolUse` | `Bash\|PowerShell` | `pre-push-gate.sh` | Normaliza el comando (continuaciones de línea, comillas, `git.exe`, rutas, opciones `-c`/`-C`) y si es un push: primero exige `target/review/REVIEW_OK` == `HEAD` y luego corre el gate; si falla, `exit 2` y la herramienta queda **bloqueada** con el motivo. Bloquea siempre `--no-verify`, `core.hooksPath`/`alias.` junto a push y push vía `eval`/variables. Cualquier otro comando pasa de inmediato. |
+| `PreToolUse` | `Edit\|Write\|MultiEdit\|NotebookEdit` | `protect-files.sh` | Bloquea escrituras a `.env*`, `*.pem`, `*.key`, `target/` y `.git/`. La plantilla de credenciales es `env.example`. |
 | `PostToolUse` | `Edit\|Write\|MultiEdit` | `format-java.sh` | Para archivos `.java` ejecuta `spotless:apply` sobre ese archivo; nunca hace fallar la edición. |
 | `Stop` | — | `remind-gate.sh` | Recordatorio no bloqueante si cambió Java y `HEAD` no tiene aprobación. |
 
@@ -396,7 +470,9 @@ aprobación del revisor para `HEAD`), nunca con `--no-verify`.
 
 Aunque el gate pase, el push se bloquea si **falta** `target/review/REVIEW_OK` o si contiene un SHA
 distinto de `HEAD` (**aprobación obsoleta**: cualquier commit nuevo la invalida, y `./mvnw clean`
-la borra).
+la borra). El hook git nativo además compara **cada commit que se empuja** con la aprobación.
+`bash scripts/hooks/test-hooks.sh` ejecuta 52 casos (formas de evadir el push, comandos inocuos,
+archivos protegidos y el hook nativo en un repo temporal).
 
 > ⚠️ **Los hooks son guardarraíles, no una frontera de seguridad:** se pueden desactivar localmente
 > (`core.hooksPath`, `--no-verify` fuera de Claude Code). Para garantizarlo en el servidor se
@@ -502,8 +578,8 @@ consumido 41,500.00) para el canal MOBILE_APP."*
 
 * `jacoco:check` en `verify` exige **LINE ≥ 0.90 y BRANCH ≥ 0.90** sobre el bundle; sólo se
   excluyen `MsTransferLimitsApplication` y el wiring puro de `config/`.
-* **Resultado al momento de la entrega: 241+ pruebas unitarias, 100 % de líneas y 100 % de
-  ramas.** El gate seguirá bloqueando cualquier cambio que baje de 90 %.
+* **Resultado al momento de la entrega: 267 pruebas unitarias, 100 % de líneas (592/592) y 100 %
+  de ramas (116/116).** El gate seguirá bloqueando cualquier cambio que baje de 90 %.
 * Pruebas: dominio y `LimitPolicy` (límites exactos, escalas), casos de uso con `Clock.fixed`,
   idempotencia, concurrencia, adaptadores de persistencia con mocks, slices `@WebMvcTest` de cada
   controller con aserciones sobre `application/problem+json`, `RejectionMessageFactory`,
@@ -522,15 +598,19 @@ consumido 41,500.00) para el canal MOBILE_APP."*
 * **Sin escaneo de dependencias** (sin OWASP dependency-check, Snyk, Dependabot ni similares).
 
 **Limitaciones**
-* La **imagen Docker y `compose.yaml` no se ejecutaron** en el entorno de construcción (no había
-  Docker instalado); quedan listos para validarse con la skill `docker-release`.
+* El **modo Docker** (imagen, `compose.yaml`, Jaeger) está listo pero se validó sólo de forma
+  estática; la demo completa se ejecutó en **modo local**. Para validarlo en un equipo con Docker:
+  `./install.sh --mode docker` o la skill `docker-release`.
+* El instalador se probó en Windows (Git Bash); en Linux/macOS usa las mismas rutas de código
+  (compatible con bash 3.2) pero no se ejecutó allí. Detrás de un proxy, Maven requiere
+  `<proxies>` en `~/.m2/settings.xml` (el instalador lo detecta y lo advierte).
 * **Sin autenticación ni autorización** (OWASP API1 / BOLA): cualquier cliente puede consultar o
   modificar cualquier cuenta. El servicio debe desplegarse **detrás de un API Gateway** que
   autentique y autorice.
 * El header `Location` del `201` apunta a `/api/v1/accounts/{accountId}/transfer-validations/{transferId}`,
   ruta que **no tiene un `GET`** implementado.
-* En Windows, Surefire puede fallar si `TMP`/`TEMP` está en una unidad distinta a `~/.m2`; define
-  `TMP` y `TEMP` en la misma unidad.
+* En Windows, Surefire puede fallar si `TMP`/`TEMP` está en una unidad distinta a `~/.m2`; el
+  instalador lo corrige solo. En ejecución manual, define `TMP` y `TEMP` en la misma unidad.
 * **Hallazgos LOW del revisor** (aceptados y documentados):
   * El dominio admite monedas distintas de `MXN`, aunque la API sólo acepta `MXN`.
   * Actuator expone `metrics` además de `health` e `info`.
@@ -552,11 +632,13 @@ MS-TRANSFER-LIMITS/
 ├── .mcp.json                              # github, context7, fetch
 ├── .mvn/wrapper/                          # Maven Wrapper (Maven 3.9.16)
 ├── config/checkstyle/google_checks.xml
-├── docs/adr/                              # ADR-001, ADR-002, ADR-003
+├── docs/
+│   ├── adr/                               # ADR-001, ADR-002, ADR-003
+│   └── REPORTE_INSTALACION_EJEMPLO.md     # reporte real de install.sh
 ├── scripts/
 │   ├── quality-gate.sh                    # gate por etapas (exit 10-14)
 │   ├── install-hooks.sh                   # core.hooksPath=.githooks
-│   ├── hooks/                             # pre-push-gate, protect-files, format-java, remind-gate
+│   ├── hooks/                             # pre-push-gate, protect-files, format-java, remind-gate, test-hooks
 │   └── lib/common.sh
 ├── src/
 │   ├── main/
@@ -574,8 +656,10 @@ MS-TRANSFER-LIMITS/
 │   └── test/java/com/banamex/transferlimits/   # espejo de main: api, application, domain, infrastructure
 ├── CLAUDE.md
 ├── PROMPT_ENJAMBRE.md                     # prompt maestro del enjambre
+├── install.sh / install.ps1               # instalación automática + demo + reporte
+├── env.example                            # plantilla de credenciales para compose (.env)
 ├── Dockerfile
-├── compose.yaml
+├── compose.yaml                           # puertos sólo en 127.0.0.1, configurables por variables
 ├── mvnw / mvnw.cmd
 └── pom.xml
 ```
